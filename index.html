@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WavVisualizer</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="viz"></canvas>
+      <canvas id="viz-gl" class="hidden"></canvas>
+
+      <div id="overlay" class="overlay">
+        <div class="overlay-inner">
+          <h1>WavVisualizer</h1>
+          <p>A Windows Media Player&ndash;style visualizer for whatever's playing on your system.</p>
+          <button id="share-btn" type="button">Share Audio</button>
+          <p class="hint">
+            Works best in Chrome/Edge. When prompted, share a tab, window, or
+            screen and make sure <strong>&ldquo;Share audio&rdquo;</strong> is checked.
+          </p>
+        </div>
+      </div>
+
+      <div id="toast" class="toast hidden"></div>
+
+      <div id="hud" class="hud hidden">
+        <button id="preset-prev" class="hud-btn" type="button" aria-label="Previous visualizer">&#8592;</button>
+        <span id="preset-name" class="preset-name">&mdash;</span>
+        <button id="preset-next" class="hud-btn" type="button" aria-label="Next visualizer">&#8594;</button>
+        <button id="load-preset-btn" class="hud-btn" type="button" aria-label="Load Butterchurn preset" title="Load a Butterchurn/MilkDrop preset (.json)">&#128193;</button>
+        <input id="load-preset-input" type="file" accept="application/json,.json" multiple class="visually-hidden" />
+        <button id="fullscreen-btn" class="hud-btn" type="button" aria-label="Toggle fullscreen">&#x26F6;</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
