@@ -109,6 +109,212 @@ body {
   cursor: default;
 }
 
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+  color: #8a86ad;
+  font-size: 0.8rem;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.soundcloud-form {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.soundcloud-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f0ff;
+  font-size: 0.9rem;
+}
+
+.soundcloud-form input::placeholder {
+  color: #75708f;
+}
+
+.soundcloud-form input:focus {
+  outline: none;
+  border-color: #ff6bcb;
+}
+
+.soundcloud-form button {
+  padding: 0.6rem 1.3rem;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: #f2f0ff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.soundcloud-form button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.soundcloud-form button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* SoundCloud's own embed — kept off-screen; we render our own Now Playing card instead. */
+.soundcloud-embed {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  width: 300px;
+  height: 166px;
+  border: 0;
+}
+
+.now-playing {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.9rem;
+  background: rgba(10, 8, 20, 0.55);
+  backdrop-filter: blur(8px);
+  color: #f2f0ff;
+  width: 18rem;
+}
+
+.now-playing.hidden {
+  display: none;
+}
+
+.now-playing-main {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.now-playing-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.queue-counter {
+  font-size: 0.7rem;
+  color: #b7b3d8;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.volume-slider {
+  flex: 1;
+  min-width: 0;
+  margin-left: 0.4rem;
+  accent-color: #ff6bcb;
+  cursor: pointer;
+}
+
+.queue-add-form {
+  display: flex;
+  gap: 0.4rem;
+  padding-top: 0.4rem;
+}
+
+.queue-add-form.hidden {
+  display: none;
+}
+
+.queue-add-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f0ff;
+  font-size: 0.75rem;
+}
+
+.queue-add-form input::placeholder {
+  color: #75708f;
+}
+
+.queue-add-form input:focus {
+  outline: none;
+  border-color: #ff6bcb;
+}
+
+.queue-add-form button {
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: #f2f0ff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.queue-add-form button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.now-playing-art {
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 0.5rem;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.now-playing-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.now-playing-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.now-playing-source {
+  font-size: 0.7rem;
+  color: #ff8ac2;
+}
+
+.now-playing .hud-btn {
+  width: 1.8rem;
+  height: 1.8rem;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.now-playing .hud-btn-sm {
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 0.65rem;
+}
+
 .toast {
   position: absolute;
   bottom: 5.5rem;

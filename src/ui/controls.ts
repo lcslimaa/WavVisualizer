@@ -1,14 +1,16 @@
 export interface ControlsCallbacks {
   onShareRequested: () => Promise<void>;
   onPresetStep: (direction: 1 | -1) => void;
+  onHomeClick: () => void;
 }
 
-/** Wires up DOM controls: Share Audio button, preset prev/next (+ arrow keys), fullscreen toggle. */
+/** Wires up DOM controls: Share Audio button, preset prev/next (+ arrow keys), fullscreen toggle, Home. */
 export function setupControls(callbacks: ControlsCallbacks): void {
   const shareBtn = document.getElementById('share-btn') as HTMLButtonElement | null;
   const prevBtn = document.getElementById('preset-prev') as HTMLButtonElement | null;
   const nextBtn = document.getElementById('preset-next') as HTMLButtonElement | null;
   const fullscreenBtn = document.getElementById('fullscreen-btn') as HTMLButtonElement | null;
+  const homeBtn = document.getElementById('home-btn') as HTMLButtonElement | null;
   const app = document.getElementById('app');
 
   shareBtn?.addEventListener('click', async () => {
@@ -35,10 +37,13 @@ export function setupControls(callbacks: ControlsCallbacks): void {
     }
   });
 
+  homeBtn?.addEventListener('click', () => callbacks.onHomeClick());
+
   window.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight') callbacks.onPresetStep(1);
     if (e.key === 'ArrowLeft') callbacks.onPresetStep(-1);
     if (e.key === 'f' || e.key === 'F') fullscreenBtn?.click();
+    if (e.key === 'Escape') homeBtn?.click();
   });
 }
 
@@ -65,6 +70,14 @@ export function showHud(show: boolean): void {
 export function setPresetName(name: string): void {
   const el = document.getElementById('preset-name');
   if (el) el.textContent = name;
+}
+
+/** Restores the Share Audio button to its idle state, e.g. after going Home (it's left disabled/"Requesting…" on success since the overlay hides immediately). */
+export function resetShareButton(): void {
+  const shareBtn = document.getElementById('share-btn') as HTMLButtonElement | null;
+  if (!shareBtn) return;
+  shareBtn.disabled = false;
+  shareBtn.textContent = 'Share Audio';
 }
 
 let toastTimer = 0;
