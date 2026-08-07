@@ -378,6 +378,43 @@ body {
   cursor: not-allowed;
 }
 
+.hud-btn.active {
+  background: linear-gradient(135deg, #7b6bff, #ff6bcb);
+  color: #0a0714;
+}
+
+.hud-btn.active:hover:not(:disabled) {
+  background: linear-gradient(135deg, #8a7bff, #ff7ed1);
+}
+
+.shuffle-interval {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: #b7b3d8;
+}
+
+.shuffle-interval input {
+  width: 3.2rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f2f0ff;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.shuffle-interval input:focus {
+  outline: none;
+  border-color: #ff6bcb;
+}
+
+.shuffle-interval input:disabled {
+  opacity: 0.35;
+}
+
 .preset-name {
   min-width: 9rem;
   text-align: center;
