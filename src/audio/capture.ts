@@ -39,8 +39,16 @@ export class AudioCapture {
    * Prompts the user to share a tab/window/screen with audio, and wires up
    * the analysis pipeline. Throws if the user cancels or the browser denies
    * audio capture (e.g. shared a source without checking "Share audio").
+   *
+   * `preferCurrentTab` surfaces "This Tab" as a prominent, easy-to-pick
+   * option in Chrome/Edge's share picker — useful when we've just mounted
+   * something (like a SoundCloud embed) in this same tab. It does not skip
+   * the picker outright, and browsers that don't support it just ignore the
+   * option and show the normal picker.
    */
-  async start(fftSize = 2048): Promise<void> {
+  async start(opts: { fftSize?: number; preferCurrentTab?: boolean } = {}): Promise<void> {
+    const { fftSize = 2048, preferCurrentTab = false } = opts;
+
     if (!navigator.mediaDevices?.getDisplayMedia) {
       throw new Error(
         "This browser doesn't support screen/tab audio capture. Try Chrome or Edge."
@@ -51,7 +59,8 @@ export class AudioCapture {
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: true,
       audio: true,
-    });
+      ...(preferCurrentTab ? { preferCurrentTab: true } : {}),
+    } as DisplayMediaStreamOptions);
 
     const audioTracks = stream.getAudioTracks();
     if (audioTracks.length === 0) {
