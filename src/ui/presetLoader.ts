@@ -40,6 +40,50 @@ export function disablePresetLoader(reason: string): void {
   loadBtn.title = reason;
 }
 
+export interface ShuffleCallbacks {
+  onToggle: () => void;
+  onIntervalChange: (seconds: number) => void;
+}
+
+/** Wires the random auto-cycle toggle + its interval (seconds) input. */
+export function setupShuffleControls(callbacks: ShuffleCallbacks): void {
+  const toggleBtn = document.getElementById('shuffle-toggle-btn') as HTMLButtonElement | null;
+  const intervalInput = document.getElementById('shuffle-interval-input') as HTMLInputElement | null;
+
+  toggleBtn?.addEventListener('click', () => callbacks.onToggle());
+
+  intervalInput?.addEventListener('change', () => {
+    const seconds = clampIntervalSeconds(Number(intervalInput.value));
+    intervalInput.value = String(seconds);
+    callbacks.onIntervalChange(seconds);
+  });
+}
+
+function clampIntervalSeconds(seconds: number): number {
+  if (!Number.isFinite(seconds)) return 15;
+  return Math.min(600, Math.max(3, Math.round(seconds)));
+}
+
+export function setShuffleActive(active: boolean): void {
+  document.getElementById('shuffle-toggle-btn')?.classList.toggle('active', active);
+}
+
+/** Enabled once there are at least 2 loaded Butterchurn presets to randomize between. */
+export function setShuffleAvailable(available: boolean): void {
+  const toggleBtn = document.getElementById('shuffle-toggle-btn') as HTMLButtonElement | null;
+  if (toggleBtn) {
+    toggleBtn.disabled = !available;
+    toggleBtn.title = available
+      ? 'Randomly cycle loaded Butterchurn presets'
+      : 'Load at least 2 Butterchurn presets to enable auto-cycle';
+  }
+}
+
+export function getShuffleIntervalSeconds(): number {
+  const intervalInput = document.getElementById('shuffle-interval-input') as HTMLInputElement | null;
+  return clampIntervalSeconds(Number(intervalInput?.value ?? 15));
+}
+
 // warp/comp shaders are always present in real Butterchurn presets (they're
 // how the preset actually renders); rejecting their absence here surfaces a
 // clear "malformed file" message immediately, rather than an opaque crash

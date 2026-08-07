@@ -32,6 +32,7 @@ Open the printed `localhost` URL in Chrome or Edge.
 - Cycle presets with the ← / → HUD buttons or arrow keys.
 - Press **F** or the HUD button to toggle fullscreen.
 - Click **📁** to load one or more Butterchurn/MilkDrop `.json` preset files — they get appended to the preset cycle.
+- Click **🔀** to auto-cycle randomly through your loaded Butterchurn presets (needs at least 2 loaded); set the interval in seconds next to it. Manually stepping presets resets the countdown; going Home turns it off.
 
 ## Project structure
 

@@ -6,7 +6,14 @@ import { ButterchurnEngine } from './butterchurn/engine';
 import type { ButterchurnPreset, LoadedPreset } from './butterchurn/engine';
 import { isButterchurnSupported } from './butterchurn/support';
 import { setupControls, showOverlay, showHud, setPresetName, showToast, resetShareButton } from './ui/controls';
-import { setupPresetLoader, disablePresetLoader } from './ui/presetLoader';
+import {
+  setupPresetLoader,
+  disablePresetLoader,
+  setupShuffleControls,
+  setShuffleActive,
+  setShuffleAvailable,
+  getShuffleIntervalSeconds,
+} from './ui/presetLoader';
 import { SoundCloudPlayer } from './soundcloud/widget';
 import {
   setupSoundCloudPanel,
@@ -50,6 +57,8 @@ const slots: Slot[] = visualizers.map((visualizer) => ({ engine: 'canvas2d', vis
 let currentIndex = 0;
 let lastTime = 0;
 let rafHandle = 0;
+let shuffleActive = false;
+let shuffleTimerHandle = 0;
 
 function currentSize(): Size {
   return { w: canvas2d.width, h: canvas2d.height };
@@ -125,6 +134,59 @@ function activateSlot(index: number, opts: { first?: boolean } = {}): void {
 
 function stepPreset(direction: 1 | -1): void {
   activateSlot(currentIndex + direction);
+  if (shuffleActive) startShuffleTimer(); // manual nav resets the countdown
+}
+
+/** Butterchurn slots are always contiguous from visualizers.length onward. */
+function getButterchurnSlotIndices(): number[] {
+  const indices: number[] = [];
+  for (let i = visualizers.length; i < slots.length; i++) indices.push(i);
+  return indices;
+}
+
+function pickRandomButterchurnIndex(excludeIndex: number): number | null {
+  const indices = getButterchurnSlotIndices();
+  if (indices.length === 0) return null;
+  // Avoid re-picking the same preset back to back when there's a choice.
+  const pool = indices.length > 1 ? indices.filter((i) => i !== excludeIndex) : indices;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function shuffleTick(): void {
+  const next = pickRandomButterchurnIndex(currentIndex);
+  if (next !== null) activateSlot(next);
+}
+
+function stopShuffleTimer(): void {
+  window.clearInterval(shuffleTimerHandle);
+  shuffleTimerHandle = 0;
+}
+
+function startShuffleTimer(): void {
+  stopShuffleTimer();
+  shuffleTimerHandle = window.setInterval(shuffleTick, getShuffleIntervalSeconds() * 1000);
+}
+
+function toggleShuffle(): void {
+  shuffleActive = !shuffleActive;
+  if (shuffleActive) startShuffleTimer();
+  else stopShuffleTimer();
+  setShuffleActive(shuffleActive);
+}
+
+function handleShuffleIntervalChange(): void {
+  if (shuffleActive) startShuffleTimer(); // restart with the new interval
+}
+
+/** Only enabled once there are at least 2 loaded Butterchurn presets to randomize between. */
+function updateShuffleAvailability(): void {
+  const available = getButterchurnSlotIndices().length >= 2;
+  setShuffleAvailable(available);
+  if (!available && shuffleActive) {
+    shuffleActive = false;
+    stopShuffleTimer();
+    setShuffleActive(false);
+  }
 }
 
 function tick(time: number): void {
@@ -150,6 +212,7 @@ function handleLoadedPresets(loaded: LoadedPreset[]): void {
     slots.push({ engine: 'butterchurn', name, preset });
   }
   activateSlot(firstNewIndex);
+  updateShuffleAvailability();
 }
 
 /** Common "we now have live audio" sequence, shared by every capture entry point. */
@@ -261,6 +324,9 @@ function handleVolumeChange(volume: number): void {
 /** Returns to the front-page overlay from any state (Share-Audio or SoundCloud session). */
 function goHome(): void {
   cancelAnimationFrame(rafHandle);
+  stopShuffleTimer();
+  shuffleActive = false;
+  setShuffleActive(false);
   const slot = slots[currentIndex];
   if (slot?.engine === 'canvas2d') slot.visualizer.dispose();
   butterchurnEngine.dispose();
@@ -296,5 +362,11 @@ if (!webglSupported) {
     "This browser doesn't support WebGL2, required for Butterchurn/MilkDrop presets."
   );
 }
+
+setupShuffleControls({
+  onToggle: toggleShuffle,
+  onIntervalChange: handleShuffleIntervalChange,
+});
+updateShuffleAvailability();
 
 resizeCanvas();

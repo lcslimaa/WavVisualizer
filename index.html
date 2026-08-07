@@ -75,6 +75,11 @@
         <button id="preset-next" class="hud-btn" type="button" aria-label="Next visualizer">&#8594;</button>
         <button id="load-preset-btn" class="hud-btn" type="button" aria-label="Load Butterchurn preset" title="Load a Butterchurn/MilkDrop preset (.json)">&#128193;</button>
         <input id="load-preset-input" type="file" accept="application/json,.json" multiple class="visually-hidden" />
+        <button id="shuffle-toggle-btn" class="hud-btn" type="button" aria-label="Toggle random auto-cycle" title="Randomly cycle loaded Butterchurn presets">&#128256;</button>
+        <span class="shuffle-interval">
+          <input id="shuffle-interval-input" type="number" min="3" max="600" step="1" value="15" aria-label="Auto-cycle interval in seconds" title="Seconds between auto-cycle switches" />
+          <span aria-hidden="true">s</span>
+        </span>
         <button id="fullscreen-btn" class="hud-btn" type="button" aria-label="Toggle fullscreen">&#x26F6;</button>
       </div>
     </div>
