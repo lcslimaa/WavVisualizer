@@ -7,6 +7,7 @@ export interface SoundCloudPanelCallbacks {
   onPrevTrack: () => void;
   onNextTrack: () => void;
   onVolumeChange: (volume: number) => void;
+  onSeek: (fraction: number) => void;
 }
 
 let idlePlayButtonLabel = 'Play';
@@ -22,22 +23,15 @@ export function setupSoundCloudPanel(callbacks: SoundCloudPanelCallbacks): void 
     () => idlePlayButtonLabel
   );
 
-  // The Now Playing card's collapsible form is how you add to an already-
-  // playing queue — the overlay form is hidden once something's playing.
-  bindSoundCloudForm(
-    'queue-add-form',
-    'queue-add-url',
-    'queue-add-submit-btn',
-    callbacks,
-    () => 'Add',
-    collapseQueueAddForm
-  );
+  // The sidebar's form is how you add to an already-playing queue — it's
+  // only reachable once the player shell is showing (the overlay form
+  // covers the pre-session "start" case).
+  bindSoundCloudForm('queue-add-form', 'queue-add-url', 'queue-add-submit-btn', callbacks, () => 'Add');
 
   const toggleBtn = document.getElementById('now-playing-toggle') as HTMLButtonElement | null;
   const prevBtn = document.getElementById('queue-prev-btn') as HTMLButtonElement | null;
   const nextBtn = document.getElementById('queue-next-btn') as HTMLButtonElement | null;
   const volumeSlider = document.getElementById('volume-slider') as HTMLInputElement | null;
-  const addToggleBtn = document.getElementById('queue-add-toggle-btn') as HTMLButtonElement | null;
 
   toggleBtn?.addEventListener('click', () => callbacks.onToggleClick());
   prevBtn?.addEventListener('click', () => callbacks.onPrevTrack());
@@ -46,12 +40,39 @@ export function setupSoundCloudPanel(callbacks: SoundCloudPanelCallbacks): void 
     callbacks.onVolumeChange(Number(volumeSlider.value));
   });
 
-  addToggleBtn?.addEventListener('click', () => {
-    const addForm = document.getElementById('queue-add-form');
-    const isHidden = addForm?.classList.toggle('hidden');
-    if (isHidden === false) {
-      (document.getElementById('queue-add-url') as HTMLInputElement | null)?.focus();
-    }
+  setupProgressBar(callbacks);
+}
+
+/** Click or drag the progress bar to seek; visual feedback is immediate, the actual seek fires on release. */
+function setupProgressBar(callbacks: SoundCloudPanelCallbacks): void {
+  const bar = document.getElementById('progress-bar');
+  if (!bar) return;
+
+  let dragging = false;
+  let pendingFraction = 0;
+
+  const fractionFromEvent = (e: PointerEvent): number => {
+    const rect = bar.getBoundingClientRect();
+    const x = Math.min(Math.max(e.clientX - rect.left, 0), rect.width);
+    return rect.width > 0 ? x / rect.width : 0;
+  };
+
+  bar.addEventListener('pointerdown', (e) => {
+    if (bar.classList.contains('disabled')) return;
+    dragging = true;
+    bar.setPointerCapture(e.pointerId);
+    pendingFraction = fractionFromEvent(e);
+    setProgressVisual(pendingFraction);
+  });
+  bar.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    pendingFraction = fractionFromEvent(e);
+    setProgressVisual(pendingFraction);
+  });
+  bar.addEventListener('pointerup', () => {
+    if (!dragging) return;
+    dragging = false;
+    callbacks.onSeek(pendingFraction);
   });
 }
 
@@ -61,8 +82,7 @@ function bindSoundCloudForm(
   inputId: string,
   submitBtnId: string,
   callbacks: SoundCloudPanelCallbacks,
-  getIdleLabel: () => string,
-  onSuccess?: () => void
+  getIdleLabel: () => string
 ): void {
   const form = document.getElementById(formId) as HTMLFormElement | null;
   const input = document.getElementById(inputId) as HTMLInputElement | null;
@@ -85,7 +105,6 @@ function bindSoundCloudForm(
     try {
       await callbacks.onPlayRequested(url);
       if (input) input.value = '';
-      onSuccess?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       showToast(message);
@@ -99,10 +118,6 @@ function bindSoundCloudForm(
   });
 }
 
-function collapseQueueAddForm(): void {
-  document.getElementById('queue-add-form')?.classList.add('hidden');
-}
-
 function isLikelySoundCloudUrl(url: string): boolean {
   try {
     const { hostname } = new URL(url);
@@ -113,11 +128,11 @@ function isLikelySoundCloudUrl(url: string): boolean {
 }
 
 export function showNowPlaying(info: TrackInfo): void {
-  const card = document.getElementById('now-playing');
+  const mini = document.getElementById('now-playing-mini');
   const art = document.getElementById('now-playing-art') as HTMLImageElement | null;
-  const title = document.getElementById('now-playing-title');
+  const caption = document.getElementById('now-playing-title');
 
-  if (title) title.textContent = info.title;
+  if (caption) caption.textContent = `NOW PLAYING: ${info.title}`;
   if (art) {
     if (info.artworkUrl) {
       art.src = info.artworkUrl;
@@ -128,13 +143,58 @@ export function showNowPlaying(info: TrackInfo): void {
     }
   }
 
-  card?.classList.remove('hidden');
+  mini?.classList.remove('hidden');
   setNowPlayingToggleState(true);
+
+  setProgressEnabled(true);
+  setProgress(0, 0, info.durationMs);
 }
 
 export function hideNowPlaying(): void {
-  document.getElementById('now-playing')?.classList.add('hidden');
-  collapseQueueAddForm();
+  document.getElementById('now-playing-mini')?.classList.add('hidden');
+  const caption = document.getElementById('now-playing-title');
+  if (caption) caption.textContent = '';
+  setProgressEnabled(false);
+}
+
+/** Called on every SoundCloud PLAY_PROGRESS tick to advance the bar and time labels. */
+export function setProgress(relativePosition: number, currentPositionMs: number, durationMs: number): void {
+  setProgressVisual(relativePosition);
+  const currentEl = document.getElementById('progress-time-current');
+  const totalEl = document.getElementById('progress-time-total');
+  if (currentEl) currentEl.textContent = formatTime(currentPositionMs);
+  if (totalEl) totalEl.textContent = formatTime(durationMs);
+}
+
+/** Enabled once a SoundCloud track is active — there's no "position" concept for raw system audio. */
+export function setProgressEnabled(enabled: boolean): void {
+  const bar = document.getElementById('progress-bar');
+  bar?.classList.toggle('disabled', !enabled);
+  bar?.setAttribute('tabindex', enabled ? '0' : '-1');
+  if (!enabled) {
+    setProgressVisual(0);
+    const currentEl = document.getElementById('progress-time-current');
+    const totalEl = document.getElementById('progress-time-total');
+    if (currentEl) currentEl.textContent = '0:00';
+    if (totalEl) totalEl.textContent = '0:00';
+  }
+}
+
+function setProgressVisual(fraction: number): void {
+  const clamped = Math.max(0, Math.min(1, fraction));
+  const pct = `${clamped * 100}%`;
+  const fill = document.getElementById('progress-bar-fill');
+  const handle = document.getElementById('progress-bar-handle');
+  if (fill) fill.style.width = pct;
+  if (handle) handle.style.left = pct;
+  document.getElementById('progress-bar')?.setAttribute('aria-valuenow', String(Math.round(clamped * 100)));
+}
+
+function formatTime(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 export function setNowPlayingToggleState(playing: boolean): void {
@@ -157,6 +217,37 @@ export function setQueueNavEnabled(hasPrev: boolean, hasNext: boolean): void {
   if (nextBtn) nextBtn.disabled = !hasNext;
 }
 
+export interface PlaylistEntry {
+  label: string;
+}
+
+/** Renders the sidebar playlist list — click a row to jump straight to that track. */
+export function renderPlaylist(entries: PlaylistEntry[], currentIndex: number, onSelect: (index: number) => void): void {
+  const list = document.getElementById('playlist-list');
+  const countEl = document.getElementById('playlist-count');
+  if (countEl) countEl.textContent = String(entries.length);
+  if (!list) return;
+
+  list.innerHTML = '';
+
+  if (entries.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'playlist-empty';
+    empty.textContent = 'Nothing queued yet — paste a link above.';
+    list.appendChild(empty);
+    return;
+  }
+
+  entries.forEach((entry, index) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'playlist-item' + (index === currentIndex ? ' current' : '');
+    item.textContent = `${index === currentIndex ? '▶ ' : ''}${String(index + 1).padStart(2, '0')}. ${entry.label}`;
+    item.addEventListener('click', () => onSelect(index));
+    list.appendChild(item);
+  });
+}
+
 /** Switches the submit button's idle label between starting fresh vs. adding to an active queue. */
 export function setPlayButtonMode(mode: 'play' | 'queue'): void {
   idlePlayButtonLabel = mode === 'queue' ? 'Add to Queue' : 'Play';
@@ -169,5 +260,4 @@ export function resetSoundCloudForm(): void {
   const input = document.getElementById('soundcloud-url') as HTMLInputElement | null;
   if (input) input.value = '';
   setPlayButtonMode('play');
-  collapseQueueAddForm();
 }

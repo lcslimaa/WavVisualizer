@@ -10,6 +10,15 @@ interface SCWidgetSound {
   user?: { username?: string };
 }
 
+interface SCWidgetProgressData {
+  /** 0-1. */
+  relativePosition: number;
+  /** Milliseconds. */
+  currentPosition: number;
+  /** 0-1. */
+  loadProgress: number;
+}
+
 interface SCWidget {
   bind(eventName: string, callback: (data?: unknown) => void): void;
   unbind(eventName: string): void;
@@ -20,6 +29,10 @@ interface SCWidget {
   setVolume(volume: number): void;
   /** 0-100. */
   getVolume(callback: (volume: number) => void): void;
+  /** Milliseconds. */
+  getDuration(callback: (durationMs: number) => void): void;
+  /** Milliseconds. */
+  seekTo(milliseconds: number): void;
 }
 
 interface SCWidgetEvents {
@@ -28,6 +41,7 @@ interface SCWidgetEvents {
   PLAY: string;
   PAUSE: string;
   FINISH: string;
+  PLAY_PROGRESS: string;
 }
 
 interface SCWidgetStatic {

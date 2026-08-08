@@ -4,83 +4,110 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet" />
     <title>WavVisualizer</title>
   </head>
   <body>
     <div id="app">
-      <canvas id="viz"></canvas>
-      <canvas id="viz-gl" class="hidden"></canvas>
-
       <div id="overlay" class="overlay">
         <div class="overlay-inner">
-          <h1>WavVisualizer</h1>
-          <p>A Windows Media Player&ndash;style visualizer for whatever's playing on your system.</p>
-          <button id="share-btn" type="button">Share Audio</button>
-          <p class="hint">
-            Works best in Chrome/Edge. When prompted, share a tab, window, or
-            screen and make sure <strong>&ldquo;Share audio&rdquo;</strong> is checked.
-          </p>
+          <div class="overlay-titlebar">
+            <span class="overlay-led"></span>
+            <span class="overlay-titletext">WavVisualizer</span>
+          </div>
+          <div class="overlay-body">
+            <h1>WavVisualizer</h1>
+            <p>A Windows Media Player&ndash;style visualizer for whatever's playing on your system.</p>
+            <button id="share-btn" type="button">Share Audio</button>
+            <p class="hint">
+              Works best in Chrome/Edge. When prompted, share a tab, window, or
+              screen and make sure <strong>&ldquo;Share audio&rdquo;</strong> is checked.
+            </p>
 
-          <div class="divider"><span>or</span></div>
+            <div class="divider"><span>or</span></div>
 
-          <form id="soundcloud-form" class="soundcloud-form">
-            <input
-              id="soundcloud-url"
-              type="url"
-              inputmode="url"
-              placeholder="Paste a SoundCloud track link&hellip;"
-              aria-label="SoundCloud track URL"
-              required
-            />
-            <button id="soundcloud-play-btn" type="submit">Play</button>
-          </form>
+            <form id="soundcloud-form" class="soundcloud-form">
+              <input
+                id="soundcloud-url"
+                type="url"
+                inputmode="url"
+                placeholder="Paste a SoundCloud track link&hellip;"
+                aria-label="SoundCloud track URL"
+                required
+              />
+              <button id="soundcloud-play-btn" type="submit">Play</button>
+            </form>
+          </div>
         </div>
       </div>
 
       <div id="toast" class="toast hidden"></div>
 
-      <div id="now-playing" class="now-playing hidden">
-        <div class="now-playing-main">
-          <img id="now-playing-art" class="now-playing-art" alt="" />
-          <div class="now-playing-info">
-            <span id="now-playing-title" class="now-playing-title">&mdash;</span>
-            <span class="now-playing-source">SoundCloud</span>
-          </div>
-          <button id="now-playing-toggle" class="hud-btn" type="button" aria-label="Play/Pause">&#9208;</button>
-        </div>
-        <div class="now-playing-controls">
-          <button id="queue-prev-btn" class="hud-btn hud-btn-sm" type="button" aria-label="Previous track">&#9664;</button>
-          <span id="queue-counter" class="queue-counter">1 / 1</span>
-          <button id="queue-next-btn" class="hud-btn hud-btn-sm" type="button" aria-label="Next track">&#9654;</button>
-          <input id="volume-slider" class="volume-slider" type="range" min="0" max="100" value="100" aria-label="Volume" />
-          <button id="queue-add-toggle-btn" class="hud-btn hud-btn-sm" type="button" aria-label="Add another track">&#43;</button>
-        </div>
-        <form id="queue-add-form" class="queue-add-form hidden">
-          <input
-            id="queue-add-url"
-            type="url"
-            inputmode="url"
-            placeholder="Paste another SoundCloud link&hellip;"
-            aria-label="Add SoundCloud track URL"
-            required
-          />
-          <button id="queue-add-submit-btn" type="submit">Add</button>
-        </form>
-      </div>
+      <div id="player-shell" class="player-shell hidden">
+        <div class="main-row">
+          <div class="main-panel">
+            <div class="visualizer-panel">
+              <canvas id="viz"></canvas>
+              <canvas id="viz-gl" class="hidden"></canvas>
+              <div class="visualizer-caption">
+                <span id="now-playing-title" class="visualizer-caption-text"></span>
+              </div>
+            </div>
 
-      <div id="hud" class="hud hidden">
-        <button id="home-btn" class="hud-btn" type="button" aria-label="Home">&#127968;</button>
-        <button id="preset-prev" class="hud-btn" type="button" aria-label="Previous visualizer">&#8592;</button>
-        <span id="preset-name" class="preset-name">&mdash;</span>
-        <button id="preset-next" class="hud-btn" type="button" aria-label="Next visualizer">&#8594;</button>
-        <button id="load-preset-btn" class="hud-btn" type="button" aria-label="Load Butterchurn preset" title="Load a Butterchurn/MilkDrop preset (.json)">&#128193;</button>
-        <input id="load-preset-input" type="file" accept="application/json,.json" multiple class="visually-hidden" />
-        <button id="shuffle-toggle-btn" class="hud-btn" type="button" aria-label="Toggle random auto-cycle" title="Randomly cycle loaded Butterchurn presets">&#128256;</button>
-        <span class="shuffle-interval">
-          <input id="shuffle-interval-input" type="number" min="3" max="600" step="1" value="15" aria-label="Auto-cycle interval in seconds" title="Seconds between auto-cycle switches" />
-          <span aria-hidden="true">s</span>
-        </span>
-        <button id="fullscreen-btn" class="hud-btn" type="button" aria-label="Toggle fullscreen">&#x26F6;</button>
+            <div class="preset-strip">
+              <button id="preset-prev" class="hud-btn" type="button" aria-label="Previous visualizer">&#8592;</button>
+              <span id="preset-name" class="preset-name">&mdash;</span>
+              <button id="preset-next" class="hud-btn" type="button" aria-label="Next visualizer">&#8594;</button>
+              <button id="load-preset-btn" class="hud-btn" type="button" aria-label="Load Butterchurn preset" title="Load a Butterchurn/MilkDrop preset (.json)">&#128193;</button>
+              <input id="load-preset-input" type="file" accept="application/json,.json" multiple class="visually-hidden" />
+              <button id="shuffle-toggle-btn" class="hud-btn" type="button" aria-label="Toggle random auto-cycle" title="Randomly cycle loaded Butterchurn presets">&#8644;</button>
+              <span class="shuffle-interval">
+                <input id="shuffle-interval-input" type="number" min="3" max="600" step="1" value="15" aria-label="Auto-cycle interval in seconds" title="Seconds between auto-cycle switches" />
+                <span aria-hidden="true">s</span>
+              </span>
+            </div>
+          </div>
+
+          <aside class="sidebar">
+            <div class="sidebar-header">PLAYLIST &mdash; <span id="playlist-count">0</span> ITEMS</div>
+            <form id="queue-add-form" class="queue-add-form">
+              <input
+                id="queue-add-url"
+                type="url"
+                inputmode="url"
+                placeholder="Paste a SoundCloud link&hellip;"
+                aria-label="Add SoundCloud track URL"
+                required
+              />
+              <button id="queue-add-submit-btn" type="submit">Add</button>
+            </form>
+            <div id="playlist-list" class="playlist-list"></div>
+
+            <div id="now-playing-mini" class="now-playing-mini hidden">
+              <img id="now-playing-art" class="now-playing-art" alt="" />
+              <span class="now-playing-source">SoundCloud</span>
+            </div>
+          </aside>
+        </div>
+
+        <div class="transport-bar">
+          <button id="home-btn" class="hud-btn" type="button" aria-label="Home">&#8962;</button>
+          <button id="queue-prev-btn" class="hud-btn" type="button" aria-label="Previous track">&#9664;</button>
+          <button id="now-playing-toggle" class="hud-btn hud-btn-play" type="button" aria-label="Play/Pause">&#9208;</button>
+          <button id="queue-next-btn" class="hud-btn" type="button" aria-label="Next track">&#9654;</button>
+          <span id="queue-counter" class="queue-counter">1 / 1</span>
+
+          <span id="progress-time-current" class="transport-time">0:00</span>
+          <div id="progress-bar" class="progress-bar" role="slider" aria-label="Playback position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+            <div id="progress-bar-fill" class="progress-bar-fill"></div>
+            <div id="progress-bar-handle" class="progress-bar-handle"></div>
+          </div>
+          <span id="progress-time-total" class="transport-time">0:00</span>
+
+          <input id="volume-slider" class="volume-slider" type="range" min="0" max="100" value="100" aria-label="Volume" title="Volume" />
+          <button id="fullscreen-btn" class="hud-btn" type="button" aria-label="Toggle fullscreen">&#x26F6;</button>
+        </div>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

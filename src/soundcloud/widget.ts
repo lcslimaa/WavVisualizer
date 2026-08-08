@@ -12,6 +12,12 @@ const READY_TIMEOUT_MS = 12000;
 export interface TrackInfo {
   title: string;
   artworkUrl: string | null;
+  durationMs: number;
+}
+
+export interface ProgressInfo {
+  relativePosition: number;
+  currentPositionMs: number;
 }
 
 let apiLoadPromise: Promise<void> | null = null;
@@ -69,9 +75,12 @@ export class SoundCloudPlayer {
         window.clearTimeout(timeout);
         widget.setVolume(this.volume);
         widget.getCurrentSound((sound) => {
-          resolve({
-            title: sound?.title ?? 'Unknown track',
-            artworkUrl: sound?.artwork_url ?? null,
+          widget.getDuration((durationMs) => {
+            resolve({
+              title: sound?.title ?? 'Unknown track',
+              artworkUrl: sound?.artwork_url ?? null,
+              durationMs,
+            });
           });
         });
       });
@@ -105,6 +114,22 @@ export class SoundCloudPlayer {
     const SC = window.SC;
     if (!this.widget || !SC) return;
     this.widget.bind(SC.Widget.Events.FINISH, () => cb());
+  }
+
+  /** Fires periodically during playback with the current position — drives the progress bar. */
+  onProgress(cb: (info: ProgressInfo) => void): void {
+    const SC = window.SC;
+    if (!this.widget || !SC) return;
+    this.widget.bind(SC.Widget.Events.PLAY_PROGRESS, (data) => {
+      const progress = data as SCWidgetProgressData | undefined;
+      if (!progress) return;
+      cb({ relativePosition: progress.relativePosition, currentPositionMs: progress.currentPosition });
+    });
+  }
+
+  /** Jumps to a position in the current track (0-1 fraction of its duration). */
+  seekTo(fraction: number, durationMs: number): void {
+    this.widget?.seekTo(Math.max(0, Math.min(1, fraction)) * durationMs);
   }
 
   private teardown(): void {

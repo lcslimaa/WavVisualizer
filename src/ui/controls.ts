@@ -48,13 +48,13 @@ export function setupControls(callbacks: ControlsCallbacks): void {
 }
 
 function showError(message: string): void {
-  const overlayInner = document.querySelector('.overlay-inner');
-  if (!overlayInner) return;
-  let errorEl = overlayInner.querySelector('.error') as HTMLParagraphElement | null;
+  const overlayBody = document.querySelector('.overlay-body');
+  if (!overlayBody) return;
+  let errorEl = overlayBody.querySelector('.error') as HTMLParagraphElement | null;
   if (!errorEl) {
     errorEl = document.createElement('p');
     errorEl.className = 'error';
-    overlayInner.appendChild(errorEl);
+    overlayBody.appendChild(errorEl);
   }
   errorEl.textContent = message;
 }
@@ -64,7 +64,7 @@ export function showOverlay(show: boolean): void {
 }
 
 export function showHud(show: boolean): void {
-  document.getElementById('hud')?.classList.toggle('hidden', !show);
+  document.getElementById('player-shell')?.classList.toggle('hidden', !show);
 }
 
 export function setPresetName(name: string): void {
