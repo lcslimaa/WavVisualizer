@@ -24,10 +24,23 @@ import {
   setQueueNavEnabled,
   setPlayButtonMode,
   resetSoundCloudForm,
+  renderPlaylist,
+  setProgress,
 } from './ui/soundcloudPanel';
 
 interface QueueTrack {
   url: string;
+  title?: string;
+}
+
+function titleFromUrl(url: string): string {
+  try {
+    const path = new URL(url).pathname.replace(/\/+$/, '');
+    const slug = path.split('/').pop() || url;
+    return decodeURIComponent(slug).replace(/[-_]+/g, ' ').trim() || url;
+  } catch {
+    return url;
+  }
 }
 
 /**
@@ -51,6 +64,7 @@ const soundCloudPlayer = new SoundCloudPlayer();
 let soundCloudPlaying = false;
 let scQueue: QueueTrack[] = [];
 let scQueueIndex = -1;
+let currentTrackDurationMs = 0;
 
 const slots: Slot[] = visualizers.map((visualizer) => ({ engine: 'canvas2d', visualizer }));
 
@@ -64,15 +78,19 @@ function currentSize(): Size {
   return { w: canvas2d.width, h: canvas2d.height };
 }
 
+/** The canvases live inside this bordered LCD panel now, not the full viewport. */
+const visualizerPanel = document.querySelector('.visualizer-panel') as HTMLElement;
+
 function resizeCanvas(): void {
   const dpr = window.devicePixelRatio || 1;
-  const w = Math.floor(window.innerWidth * dpr);
-  const h = Math.floor(window.innerHeight * dpr);
+  const rect = visualizerPanel.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(rect.width * dpr));
+  const h = Math.max(1, Math.floor(rect.height * dpr));
   for (const c of [canvas2d, glCanvas]) {
     c.width = w;
     c.height = h;
-    c.style.width = `${window.innerWidth}px`;
-    c.style.height = `${window.innerHeight}px`;
+    c.style.width = `${rect.width}px`;
+    c.style.height = `${rect.height}px`;
   }
   const slot = slots[currentIndex];
   if (slot?.engine === 'canvas2d') slot.visualizer.resize(currentSize());
@@ -253,22 +271,43 @@ function handleSoundCloudPlayStateChange(playing: boolean): void {
 function updateQueueUI(): void {
   setQueueCounter(scQueueIndex + 1, scQueue.length);
   setQueueNavEnabled(scQueueIndex > 0, scQueueIndex < scQueue.length - 1);
+  renderPlaylist(
+    scQueue.map((track) => ({ label: track.title ?? titleFromUrl(track.url) })),
+    scQueueIndex,
+    jumpToQueueTrack
+  );
 }
 
-/** Loads and plays the queue item at `index` — used for the initial track and every prev/next/auto-advance. */
+function jumpToQueueTrack(index: number): void {
+  if (index === scQueueIndex) return;
+  loadQueueTrack(index).catch((err) => {
+    showToast(err instanceof Error ? err.message : String(err));
+  });
+}
+
+/** Loads and plays the queue item at `index` — used for the initial track and every prev/next/auto-advance/click. */
 async function loadQueueTrack(index: number): Promise<void> {
   const track = scQueue[index];
   if (!track) return;
 
   const info = await soundCloudPlayer.load(track.url);
+  track.title = info.title;
+  currentTrackDurationMs = info.durationMs;
   scQueueIndex = index;
   soundCloudPlayer.play();
   // Rebound every load() — a fresh widget instance is created each time.
   soundCloudPlayer.onPlayStateChange(handleSoundCloudPlayStateChange);
   soundCloudPlayer.onFinish(playNextInQueue);
+  soundCloudPlayer.onProgress((progress) => {
+    setProgress(progress.relativePosition, progress.currentPositionMs, currentTrackDurationMs);
+  });
   soundCloudPlaying = true;
   showNowPlaying(info);
   updateQueueUI();
+}
+
+function handleSeek(fraction: number): void {
+  soundCloudPlayer.seekTo(fraction, currentTrackDurationMs);
 }
 
 function playNextInQueue(): void {
@@ -334,6 +373,7 @@ function goHome(): void {
   soundCloudPlayer.dispose();
   hideNowPlaying();
   resetSoundCloudQueue();
+  updateQueueUI();
   resetSoundCloudForm();
   resetShareButton();
   showHud(false);
@@ -354,6 +394,7 @@ setupSoundCloudPanel({
   onPrevTrack: playPrevInQueue,
   onNextTrack: playNextInQueue,
   onVolumeChange: handleVolumeChange,
+  onSeek: handleSeek,
 });
 
 setupPresetLoader(handleLoadedPresets);
