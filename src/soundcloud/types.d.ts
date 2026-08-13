@@ -33,6 +33,16 @@ interface SCWidget {
   getDuration(callback: (durationMs: number) => void): void;
   /** Milliseconds. */
   seekTo(milliseconds: number): void;
+  /** Only meaningful for a widget loaded with a Set/playlist URL. */
+  getSounds(callback: (sounds: SCWidgetSound[]) => void): void;
+  /** Only meaningful for a widget loaded with a Set/playlist URL. */
+  getCurrentSoundIndex(callback: (index: number) => void): void;
+  /** Skips to the next sound. Only for multi-sound (Set) widgets. */
+  next(): void;
+  /** Skips to the previous sound. Only for multi-sound (Set) widgets. */
+  prev(): void;
+  /** Jumps to the sound at `soundIndex` (0-based). Only for multi-sound (Set) widgets. */
+  skip(soundIndex: number): void;
 }
 
 interface SCWidgetEvents {
