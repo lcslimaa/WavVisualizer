@@ -14,7 +14,7 @@ import {
   setShuffleAvailable,
   getShuffleIntervalSeconds,
 } from './ui/presetLoader';
-import { SoundCloudPlayer } from './soundcloud/widget';
+import { SoundCloudPlayer, type TrackInfo } from './soundcloud/widget';
 import {
   setupSoundCloudPanel,
   showNowPlaying,
@@ -43,6 +43,15 @@ function titleFromUrl(url: string): string {
   }
 }
 
+/** Both soundcloud.com/user/sets/name and soundcloud.com/discover/sets/... match. */
+function isSetUrl(url: string): boolean {
+  try {
+    return new URL(url).pathname.includes('/sets/');
+  } catch {
+    return false;
+  }
+}
+
 /**
  * A "slot" is one entry in the unified, cyclable preset list. The first
  * `visualizers.length` slots are our hand-built Canvas2D presets; any
@@ -62,9 +71,16 @@ const butterchurnEngine = new ButterchurnEngine();
 const webglSupported = isButterchurnSupported();
 const soundCloudPlayer = new SoundCloudPlayer();
 let soundCloudPlaying = false;
+let scMode: 'queue' | 'set' | null = null;
 let scQueue: QueueTrack[] = [];
 let scQueueIndex = -1;
+let scSetTracks: TrackInfo[] = [];
+let scSetIndex = -1;
 let currentTrackDurationMs = 0;
+// Bumped on every startSet() call so a delayed scheduleSetTrackRefresh()
+// from an earlier Set (or one the user has since navigated away from) can
+// tell it's stale and bail instead of overwriting the current session.
+let scSessionId = 0;
 
 const slots: Slot[] = visualizers.map((visualizer) => ({ engine: 'canvas2d', visualizer }));
 
@@ -249,15 +265,18 @@ function onCaptureReady(): void {
   rafHandle = requestAnimationFrame(tick);
 }
 
-function resetSoundCloudQueue(): void {
+function resetSoundCloudSession(): void {
+  scMode = null;
   scQueue = [];
   scQueueIndex = -1;
+  scSetTracks = [];
+  scSetIndex = -1;
 }
 
 async function startVisualizing(): Promise<void> {
   soundCloudPlayer.dispose();
   hideNowPlaying();
-  resetSoundCloudQueue();
+  resetSoundCloudSession();
   setPlayButtonMode('play');
   await capture.start();
   onCaptureReady();
@@ -268,14 +287,28 @@ function handleSoundCloudPlayStateChange(playing: boolean): void {
   setNowPlayingToggleState(playing);
 }
 
-function updateQueueUI(): void {
-  setQueueCounter(scQueueIndex + 1, scQueue.length);
-  setQueueNavEnabled(scQueueIndex > 0, scQueueIndex < scQueue.length - 1);
-  renderPlaylist(
-    scQueue.map((track) => ({ label: track.title ?? titleFromUrl(track.url) })),
-    scQueueIndex,
-    jumpToQueueTrack
-  );
+function updateSoundCloudUI(): void {
+  if (scMode === 'set') {
+    setQueueCounter(scSetIndex + 1, scSetTracks.length);
+    setQueueNavEnabled(scSetIndex > 0, scSetIndex < scSetTracks.length - 1);
+    renderPlaylist(
+      scSetTracks.map((track) => ({ label: track.title })),
+      scSetIndex,
+      jumpToSetTrack
+    );
+  } else if (scMode === 'queue') {
+    setQueueCounter(scQueueIndex + 1, scQueue.length);
+    setQueueNavEnabled(scQueueIndex > 0, scQueueIndex < scQueue.length - 1);
+    renderPlaylist(
+      scQueue.map((track) => ({ label: track.title ?? titleFromUrl(track.url) })),
+      scQueueIndex,
+      jumpToQueueTrack
+    );
+  } else {
+    setQueueCounter(0, 0);
+    setQueueNavEnabled(false, false);
+    renderPlaylist([], -1, () => {});
+  }
 }
 
 function jumpToQueueTrack(index: number): void {
@@ -283,6 +316,95 @@ function jumpToQueueTrack(index: number): void {
   loadQueueTrack(index).catch((err) => {
     showToast(err instanceof Error ? err.message : String(err));
   });
+}
+
+function jumpToSetTrack(index: number): void {
+  if (index === scSetIndex) return;
+  soundCloudPlayer.skipTo(index);
+}
+
+/**
+ * Binds the handlers that keep the UI in sync with a Set's internal
+ * playback — must be (re)bound after every loadSet() call, since a fresh
+ * widget instance is created each time. onTrackChange is what fixes the bug
+ * where the title froze while SoundCloud auto-advanced through a Set.
+ */
+function bindSetTrackChangeHandlers(): void {
+  // Deliberately no onFinish binding here (unlike loadQueueTrack): onFinish
+  // exists to trigger *our* manual advance-to-next-queue-item logic, which
+  // doesn't apply in Set mode — the widget advances through the Set on its
+  // own, and onTrackChange (below) is what picks up each resulting track
+  // change.
+  soundCloudPlayer.onPlayStateChange(handleSoundCloudPlayStateChange);
+  soundCloudPlayer.onTrackChange((info, index) => {
+    scSetIndex = index;
+    currentTrackDurationMs = info.durationMs;
+    showNowPlaying(info);
+    updateSoundCloudUI();
+  });
+  soundCloudPlayer.onProgress((progress) => {
+    setProgress(progress.relativePosition, progress.currentPositionMs, currentTrackDurationMs);
+  });
+}
+
+async function startQueueFresh(url: string): Promise<void> {
+  scMode = 'queue';
+  scQueue = [{ url }];
+  await loadQueueTrack(0);
+}
+
+async function startSet(url: string): Promise<void> {
+  const sessionId = ++scSessionId;
+  const { tracks, initialIndex } = await soundCloudPlayer.loadSet(url);
+  scMode = 'set';
+  scSetTracks = tracks;
+  scSetIndex = initialIndex;
+  bindSetTrackChangeHandlers();
+  soundCloudPlayer.play();
+  soundCloudPlaying = true;
+  // Shows immediately from the Set's track list; onTrackChange corrects
+  // durationMs (0 here, a placeholder — see loadSet's doc comment) once the
+  // first PLAY event fires.
+  showNowPlaying(tracks[initialIndex]);
+  updateSoundCloudUI();
+  scheduleSetTrackRefresh(sessionId);
+}
+
+/**
+ * A large Set's track list often isn't fully resolved the instant loadSet()
+ * returns — SoundCloud fills in later entries' titles/artwork over the next
+ * several seconds, so an initial getSounds() call can come back with several
+ * "Unknown track" placeholders. Poll a few more times with backoff and
+ * backfill whatever resolves, stopping once nothing's left unresolved or
+ * after a handful of attempts. `sessionId` guards against a stale timer from
+ * a Set the user has since replaced or left applying its results late.
+ */
+function scheduleSetTrackRefresh(sessionId: number, attempt = 0): void {
+  const delays = [1500, 3000, 5000, 8000];
+  if (attempt >= delays.length) return;
+
+  window.setTimeout(async () => {
+    if (scSessionId !== sessionId || scMode !== 'set') return;
+
+    const refreshed = await soundCloudPlayer.refreshSounds();
+    if (scSessionId !== sessionId || scMode !== 'set') return;
+
+    let changed = false;
+    let stillUnresolved = false;
+    scSetTracks = scSetTracks.map((track, index) => {
+      const fresh = refreshed[index];
+      if (track.title !== 'Unknown track' || !fresh) return track;
+      if (fresh.title === 'Unknown track') {
+        stillUnresolved = true;
+        return track;
+      }
+      changed = true;
+      return { ...track, title: fresh.title, artworkUrl: fresh.artworkUrl };
+    });
+
+    if (changed) updateSoundCloudUI();
+    if (stillUnresolved) scheduleSetTrackRefresh(sessionId, attempt + 1);
+  }, delays[attempt]);
 }
 
 /** Loads and plays the queue item at `index` — used for the initial track and every prev/next/auto-advance/click. */
@@ -303,7 +425,7 @@ async function loadQueueTrack(index: number): Promise<void> {
   });
   soundCloudPlaying = true;
   showNowPlaying(info);
-  updateQueueUI();
+  updateSoundCloudUI();
 }
 
 function handleSeek(fraction: number): void {
@@ -324,31 +446,63 @@ function playPrevInQueue(): void {
   });
 }
 
+function playNextTrack(): void {
+  if (scMode === 'set') {
+    if (scSetIndex < scSetTracks.length - 1) soundCloudPlayer.next();
+  } else {
+    playNextInQueue();
+  }
+}
+
+function playPrevTrack(): void {
+  if (scMode === 'set') {
+    if (scSetIndex > 0) soundCloudPlayer.prev();
+  } else {
+    playPrevInQueue();
+  }
+}
+
 async function startFromSoundCloud(url: string): Promise<void> {
-  if (scQueue.length > 0) {
-    // Already playing from SoundCloud — queue it instead of restarting capture.
+  if (scMode === 'queue' && scQueue.length > 0 && !isSetUrl(url)) {
+    // Already playing a queue — add to it instead of restarting capture.
     scQueue.push({ url });
-    updateQueueUI();
+    updateSoundCloudUI();
     showToast('Added to queue.');
     return;
   }
 
-  // Request tab-audio capture FIRST, while the click's user-activation is
-  // still fresh — before touching the SoundCloud widget, which needs its
-  // own network round-trip to load. If the user cancels the picker, we
-  // never mount anything that couldn't be visualized.
-  await capture.start({ preferCurrentTab: true });
+  // A Set can't be appended to (SoundCloud's widget has no such method) —
+  // any new paste while one's active replaces it. If we're already
+  // capturing (an active Set, or a plain Share-Audio session with no
+  // SoundCloud track yet), reuse that capture instead of requesting a new
+  // one — re-requesting would show another share picker unnecessarily.
+  const alreadyCapturing = capture.isActive && scMode !== null;
+  if (!alreadyCapturing) {
+    // Request tab-audio capture FIRST, while the click's user-activation is
+    // still fresh — before touching the SoundCloud widget, which needs its
+    // own network round-trip to load. If the user cancels the picker, we
+    // never mount anything that couldn't be visualized.
+    await capture.start({ preferCurrentTab: true });
+  }
 
-  scQueue = [{ url }];
   try {
-    await loadQueueTrack(0);
-    setPlayButtonMode('queue');
-    onCaptureReady();
+    if (isSetUrl(url)) {
+      await startSet(url);
+    } else {
+      await startQueueFresh(url);
+    }
   } catch (err) {
-    capture.stop();
-    resetSoundCloudQueue();
+    if (!alreadyCapturing) capture.stop();
+    soundCloudPlayer.dispose();
+    resetSoundCloudSession();
+    hideNowPlaying();
+    updateSoundCloudUI();
+    setPlayButtonMode('play');
     throw err;
   }
+
+  setPlayButtonMode(scMode === 'queue' ? 'queue' : 'play');
+  if (!alreadyCapturing) onCaptureReady();
 }
 
 function toggleSoundCloudPlayback(): void {
@@ -372,8 +526,8 @@ function goHome(): void {
   capture.stop();
   soundCloudPlayer.dispose();
   hideNowPlaying();
-  resetSoundCloudQueue();
-  updateQueueUI();
+  resetSoundCloudSession();
+  updateSoundCloudUI();
   resetSoundCloudForm();
   resetShareButton();
   showHud(false);
@@ -391,8 +545,8 @@ setupControls({
 setupSoundCloudPanel({
   onPlayRequested: startFromSoundCloud,
   onToggleClick: toggleSoundCloudPlayback,
-  onPrevTrack: playPrevInQueue,
-  onNextTrack: playNextInQueue,
+  onPrevTrack: playPrevTrack,
+  onNextTrack: playNextTrack,
   onVolumeChange: handleVolumeChange,
   onSeek: handleSeek,
 });
