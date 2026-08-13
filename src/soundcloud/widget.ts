@@ -94,6 +94,30 @@ export class SoundCloudPlayer {
     });
   }
 
+  /**
+   * Set-mode only: re-fetches every track's title/artwork from the widget's
+   * sound list. SoundCloud's multi-sound widget doesn't have all of a large
+   * Set's metadata resolved the instant it becomes READY — calling
+   * getSounds() again a little later often fills in entries that first came
+   * back as "Unknown track". Returns `[]` if there's no active widget (e.g.
+   * the session has since moved on).
+   */
+  async refreshSounds(): Promise<TrackInfo[]> {
+    const widget = this.widget;
+    if (!widget) return [];
+    return new Promise((resolve) => {
+      widget.getSounds((sounds) => {
+        resolve(
+          (sounds ?? []).map((sound) => ({
+            title: sound?.title ?? 'Unknown track',
+            artworkUrl: sound?.artwork_url ?? null,
+            durationMs: 0,
+          }))
+        );
+      });
+    });
+  }
+
   /** Shared by load()/loadSet(): mounts a fresh embed for `url` and resolves once it's playable. */
   private async createReadyWidget(url: string): Promise<SCWidget> {
     await loadWidgetApi();

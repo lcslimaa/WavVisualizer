@@ -77,6 +77,10 @@ let scQueueIndex = -1;
 let scSetTracks: TrackInfo[] = [];
 let scSetIndex = -1;
 let currentTrackDurationMs = 0;
+// Bumped on every startSet() call so a delayed scheduleSetTrackRefresh()
+// from an earlier Set (or one the user has since navigated away from) can
+// tell it's stale and bail instead of overwriting the current session.
+let scSessionId = 0;
 
 const slots: Slot[] = visualizers.map((visualizer) => ({ engine: 'canvas2d', visualizer }));
 
@@ -350,6 +354,7 @@ async function startQueueFresh(url: string): Promise<void> {
 }
 
 async function startSet(url: string): Promise<void> {
+  const sessionId = ++scSessionId;
   const { tracks, initialIndex } = await soundCloudPlayer.loadSet(url);
   scMode = 'set';
   scSetTracks = tracks;
@@ -362,6 +367,44 @@ async function startSet(url: string): Promise<void> {
   // first PLAY event fires.
   showNowPlaying(tracks[initialIndex]);
   updateSoundCloudUI();
+  scheduleSetTrackRefresh(sessionId);
+}
+
+/**
+ * A large Set's track list often isn't fully resolved the instant loadSet()
+ * returns — SoundCloud fills in later entries' titles/artwork over the next
+ * several seconds, so an initial getSounds() call can come back with several
+ * "Unknown track" placeholders. Poll a few more times with backoff and
+ * backfill whatever resolves, stopping once nothing's left unresolved or
+ * after a handful of attempts. `sessionId` guards against a stale timer from
+ * a Set the user has since replaced or left applying its results late.
+ */
+function scheduleSetTrackRefresh(sessionId: number, attempt = 0): void {
+  const delays = [1500, 3000, 5000, 8000];
+  if (attempt >= delays.length) return;
+
+  window.setTimeout(async () => {
+    if (scSessionId !== sessionId || scMode !== 'set') return;
+
+    const refreshed = await soundCloudPlayer.refreshSounds();
+    if (scSessionId !== sessionId || scMode !== 'set') return;
+
+    let changed = false;
+    let stillUnresolved = false;
+    scSetTracks = scSetTracks.map((track, index) => {
+      const fresh = refreshed[index];
+      if (track.title !== 'Unknown track' || !fresh) return track;
+      if (fresh.title === 'Unknown track') {
+        stillUnresolved = true;
+        return track;
+      }
+      changed = true;
+      return { ...track, title: fresh.title, artworkUrl: fresh.artworkUrl };
+    });
+
+    if (changed) updateSoundCloudUI();
+    if (stillUnresolved) scheduleSetTrackRefresh(sessionId, attempt + 1);
+  }, delays[attempt]);
 }
 
 /** Loads and plays the queue item at `index` — used for the initial track and every prev/next/auto-advance/click. */
