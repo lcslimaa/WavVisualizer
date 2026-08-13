@@ -25,3 +25,8 @@ sample-presets
 *.njsproj
 *.sln
 *.sw?
+
+# Internal planning/process artifacts (specs, plans, SDD workspaces) — not
+# part of the shipped app, kept local rather than pushed to GitHub.
+docs
+.superpowers
