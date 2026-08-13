@@ -420,7 +420,7 @@ function playPrevTrack(): void {
 }
 
 async function startFromSoundCloud(url: string): Promise<void> {
-  if (scMode === 'queue' && scQueue.length > 0) {
+  if (scMode === 'queue' && scQueue.length > 0 && !isSetUrl(url)) {
     // Already playing a queue — add to it instead of restarting capture.
     scQueue.push({ url });
     updateSoundCloudUI();
@@ -433,7 +433,7 @@ async function startFromSoundCloud(url: string): Promise<void> {
   // capturing (an active Set, or a plain Share-Audio session with no
   // SoundCloud track yet), reuse that capture instead of requesting a new
   // one — re-requesting would show another share picker unnecessarily.
-  const alreadyCapturing = capture.isActive;
+  const alreadyCapturing = capture.isActive && scMode !== null;
   if (!alreadyCapturing) {
     // Request tab-audio capture FIRST, while the click's user-activation is
     // still fresh — before touching the SoundCloud widget, which needs its
@@ -450,7 +450,11 @@ async function startFromSoundCloud(url: string): Promise<void> {
     }
   } catch (err) {
     if (!alreadyCapturing) capture.stop();
+    soundCloudPlayer.dispose();
     resetSoundCloudSession();
+    hideNowPlaying();
+    updateSoundCloudUI();
+    setPlayButtonMode('play');
     throw err;
   }
 
