@@ -20,6 +20,11 @@ export interface ProgressInfo {
   currentPositionMs: number;
 }
 
+export interface SetInfo {
+  tracks: TrackInfo[];
+  initialIndex: number;
+}
+
 let apiLoadPromise: Promise<void> | null = null;
 
 function loadWidgetApi(): Promise<void> {
@@ -47,13 +52,57 @@ export class SoundCloudPlayer {
 
   /** Loads a track URL into the embed and resolves with its title/artwork once playable. */
   async load(trackUrl: string): Promise<TrackInfo> {
+    const widget = await this.createReadyWidget(trackUrl);
+    return new Promise<TrackInfo>((resolve) => {
+      widget.getCurrentSound((sound) => {
+        widget.getDuration((durationMs) => {
+          resolve({
+            title: sound?.title ?? 'Unknown track',
+            artworkUrl: sound?.artwork_url ?? null,
+            durationMs,
+          });
+        });
+      });
+    });
+  }
+
+  /**
+   * Loads a Set/playlist URL as a multi-sound widget and resolves with every
+   * track's title/artwork plus which one is initially active. Per-track
+   * `durationMs` is 0 for entries other than the initially active one —
+   * SoundCloud's sound-list objects don't include duration, only the
+   * currently-active sound does (via getDuration()). The active track's real
+   * duration arrives via onTrackChange once playback starts.
+   */
+  async loadSet(setUrl: string): Promise<SetInfo> {
+    const widget = await this.createReadyWidget(setUrl);
+    return new Promise<SetInfo>((resolve, reject) => {
+      widget.getSounds((sounds) => {
+        if (!sounds || sounds.length === 0) {
+          reject(new Error('This playlist has no playable tracks.'));
+          return;
+        }
+        widget.getCurrentSoundIndex((initialIndex) => {
+          const tracks = sounds.map((sound) => ({
+            title: sound?.title ?? 'Unknown track',
+            artworkUrl: sound?.artwork_url ?? null,
+            durationMs: 0,
+          }));
+          resolve({ tracks, initialIndex: initialIndex ?? 0 });
+        });
+      });
+    });
+  }
+
+  /** Shared by load()/loadSet(): mounts a fresh embed for `url` and resolves once it's playable. */
+  private async createReadyWidget(url: string): Promise<SCWidget> {
     await loadWidgetApi();
     this.teardown();
 
     const iframe = document.createElement('iframe');
     iframe.className = 'soundcloud-embed';
     iframe.allow = 'autoplay';
-    iframe.src = `https://w.soundcloud.com/player/?url=${encodeURIComponent(trackUrl)}&auto_play=true&show_artwork=false&visual=false`;
+    iframe.src = `https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&auto_play=true&show_artwork=false&visual=false`;
     document.body.appendChild(iframe);
     this.iframe = iframe;
 
@@ -61,28 +110,20 @@ export class SoundCloudPlayer {
     const widget = SC.Widget(iframe);
     this.widget = widget;
 
-    return new Promise<TrackInfo>((resolve, reject) => {
+    return new Promise<SCWidget>((resolve, reject) => {
       const timeout = window.setTimeout(() => {
-        reject(new Error('Track took too long to load — it may not be public or embeddable.'));
+        reject(new Error('Took too long to load — it may not be public or embeddable.'));
       }, READY_TIMEOUT_MS);
 
       widget.bind(SC.Widget.Events.ERROR, () => {
         window.clearTimeout(timeout);
-        reject(new Error("This track can't be played — it may be private or restricted."));
+        reject(new Error("This can't be played — it may be private or restricted."));
       });
 
       widget.bind(SC.Widget.Events.READY, () => {
         window.clearTimeout(timeout);
         widget.setVolume(this.volume);
-        widget.getCurrentSound((sound) => {
-          widget.getDuration((durationMs) => {
-            resolve({
-              title: sound?.title ?? 'Unknown track',
-              artworkUrl: sound?.artwork_url ?? null,
-              durationMs,
-            });
-          });
-        });
+        resolve(widget);
       });
     });
   }
@@ -130,6 +171,48 @@ export class SoundCloudPlayer {
   /** Jumps to a position in the current track (0-1 fraction of its duration). */
   seekTo(fraction: number, durationMs: number): void {
     this.widget?.seekTo(Math.max(0, Math.min(1, fraction)) * durationMs);
+  }
+
+  /** Set-mode only: skips to the next track in the loaded Set. */
+  next(): void {
+    this.widget?.next();
+  }
+
+  /** Set-mode only: skips to the previous track in the loaded Set. */
+  prev(): void {
+    this.widget?.prev();
+  }
+
+  /** Set-mode only: jumps directly to the track at `index` (0-based). */
+  skipTo(index: number): void {
+    this.widget?.skip(index);
+  }
+
+  /**
+   * Set-mode only: fires whenever playback (re)starts, re-fetching fresh
+   * track metadata each time. This is how the UI learns a Set auto-advanced
+   * to a new track — SoundCloud's Widget API has no dedicated "track
+   * changed" event, so PLAY (which fires reliably on every track start,
+   * including auto-advance within a Set) is the most reliable signal
+   * available. Deliberately separate from onPlayStateChange so Queue mode
+   * (which doesn't need this) isn't affected.
+   */
+  onTrackChange(cb: (info: TrackInfo, index: number) => void): void {
+    const SC = window.SC;
+    const widget = this.widget;
+    if (!widget || !SC) return;
+    widget.bind(SC.Widget.Events.PLAY, () => {
+      widget.getCurrentSound((sound) => {
+        widget.getCurrentSoundIndex((index) => {
+          widget.getDuration((durationMs) => {
+            cb(
+              { title: sound?.title ?? 'Unknown track', artworkUrl: sound?.artwork_url ?? null, durationMs },
+              index ?? 0
+            );
+          });
+        });
+      });
+    });
   }
 
   private teardown(): void {
