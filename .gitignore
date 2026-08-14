@@ -30,3 +30,6 @@ sample-presets
 # part of the shipped app, kept local rather than pushed to GitHub.
 docs
 .superpowers
+
+# Spotify Client ID — not a secret, but keeps per-developer config out of git.
+.env
