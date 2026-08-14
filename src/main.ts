@@ -17,17 +17,23 @@ import {
 import { SoundCloudPlayer } from './soundcloud/widget';
 import type { MediaSource, TrackInfo } from './media/types';
 import {
-  setupSoundCloudPanel,
+  setupPlayerPanel,
   showNowPlaying,
   hideNowPlaying,
   setNowPlayingToggleState,
   setQueueCounter,
   setQueueNavEnabled,
   setPlayButtonMode,
-  resetSoundCloudForm,
+  resetPlayerForm,
   renderPlaylist,
   setProgress,
-} from './ui/soundcloudPanel';
+  showSpotifyLoginPrompt,
+  prefillLinkInput,
+  setNowPlayingSource,
+} from './ui/playerPanel';
+import { SpotifyPlayer } from './spotify/player';
+import { parseSpotifyUrl, toSpotifyUri, type SpotifyLink } from './spotify/url';
+import { login as spotifyLogin, isLoggedIn, handleRedirectCallback } from './spotify/auth';
 
 interface QueueTrack {
   url: string;
@@ -53,6 +59,17 @@ function isSetUrl(url: string): boolean {
   }
 }
 
+function detectProvider(url: string): 'soundcloud' | 'spotify' | null {
+  try {
+    const { hostname } = new URL(url);
+    if (hostname === 'soundcloud.com' || hostname.endsWith('.soundcloud.com')) return 'soundcloud';
+    if (hostname === 'open.spotify.com') return 'spotify';
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * A "slot" is one entry in the unified, cyclable preset list. The first
  * `visualizers.length` slots are our hand-built Canvas2D presets; any
@@ -71,7 +88,13 @@ const capture = new AudioCapture();
 const butterchurnEngine = new ButterchurnEngine();
 const webglSupported = isButterchurnSupported();
 const soundCloudPlayer = new SoundCloudPlayer();
+const spotifyPlayer = new SpotifyPlayer();
+spotifyPlayer.onError((message) => showToast(message));
 let sourcePlaying = false;
+// Set while the "Log in with Spotify" button is showing — the link that
+// triggered it, so the button's click handler knows what to resume once
+// login() redirects back.
+let spotifyLoginPendingUrl: string | null = null;
 
 /**
  * The single active playback session, generalized across providers.
@@ -286,6 +309,7 @@ function resetPlaybackSession(): void {
 
 async function startVisualizing(): Promise<void> {
   soundCloudPlayer.dispose();
+  spotifyPlayer.dispose();
   hideNowPlaying();
   resetPlaybackSession();
   setPlayButtonMode('play');
@@ -401,8 +425,102 @@ async function startSet(url: string): Promise<void> {
   // durationMs (0 here, a placeholder — see loadSet's doc comment) once the
   // first PLAY event fires.
   showNowPlaying(tracks[initialIndex]);
+  setNowPlayingSource('SoundCloud');
   updatePlayerUI();
   scheduleSetTrackRefresh(sessionId);
+}
+
+async function startSpotifyQueueFresh(url: string): Promise<void> {
+  const sessionId = ++nextSessionId;
+  activeSource = {
+    provider: 'spotify',
+    player: spotifyPlayer,
+    mode: 'queue',
+    queue: [{ url }],
+    queueIndex: -1,
+    setTracks: [],
+    setIndex: -1,
+    durationMs: 0,
+    sessionId,
+  };
+  await loadQueueTrack(0);
+}
+
+async function startSpotifySet(link: SpotifyLink): Promise<void> {
+  const sessionId = ++nextSessionId;
+  const contextUri = toSpotifyUri(link);
+  const { tracks, initialIndex } = await spotifyPlayer.loadContext(contextUri);
+  activeSource = {
+    provider: 'spotify',
+    player: spotifyPlayer,
+    mode: 'set',
+    queue: [],
+    queueIndex: -1,
+    setTracks: tracks,
+    setIndex: initialIndex,
+    durationMs: 0,
+    sessionId,
+  };
+  bindSetTrackChangeHandlers(spotifyPlayer);
+  spotifyPlayer.play();
+  sourcePlaying = true;
+  showNowPlaying(tracks[initialIndex]);
+  setNowPlayingSource('Spotify');
+  updatePlayerUI();
+}
+
+async function startFromSpotify(url: string): Promise<void> {
+  const link = parseSpotifyUrl(url);
+  if (!link) {
+    showToast("That doesn't look like a Spotify link.");
+    return;
+  }
+
+  if (!isLoggedIn()) {
+    spotifyLoginPendingUrl = url;
+    showSpotifyLoginPrompt(true);
+    return;
+  }
+
+  if (activeSource?.provider === 'spotify' && activeSource.mode === 'queue' && link.type === 'track') {
+    activeSource.queue.push({ url });
+    updatePlayerUI();
+    showToast('Added to queue.');
+    return;
+  }
+
+  disposeStalePlayer('spotify');
+
+  const alreadyCapturing = capture.isActive && activeSource !== null;
+  if (!alreadyCapturing) {
+    await capture.start({ preferCurrentTab: true });
+  }
+
+  try {
+    if (link.type === 'track') {
+      await startSpotifyQueueFresh(url);
+    } else {
+      await startSpotifySet(link);
+    }
+  } catch (err) {
+    if (!alreadyCapturing) capture.stop();
+    spotifyPlayer.dispose();
+    resetPlaybackSession();
+    hideNowPlaying();
+    updatePlayerUI();
+    setPlayButtonMode('play');
+    throw err;
+  }
+
+  setPlayButtonMode(activeSource?.mode === 'queue' ? 'queue' : 'play');
+  if (!alreadyCapturing) onCaptureReady();
+}
+
+function handleSpotifyLoginClick(): void {
+  if (!spotifyLoginPendingUrl) return;
+  spotifyLogin(spotifyLoginPendingUrl).catch((err) => {
+    showToast(err instanceof Error ? err.message : String(err));
+  });
 }
 
 /**
@@ -451,20 +569,28 @@ async function loadQueueTrack(index: number): Promise<void> {
   const track = activeSource.queue[index];
   if (!track) return;
 
-  const info = await soundCloudPlayer.load(track.url);
+  let info: TrackInfo;
+  if (activeSource.provider === 'spotify') {
+    const link = parseSpotifyUrl(track.url);
+    if (!link) throw new Error('Invalid Spotify link.');
+    info = await spotifyPlayer.loadTrack(toSpotifyUri(link));
+  } else {
+    info = await soundCloudPlayer.load(track.url);
+  }
+
   track.title = info.title;
   activeSource.durationMs = info.durationMs;
   activeSource.queueIndex = index;
-  soundCloudPlayer.play();
-  // Rebound every load() — a fresh widget instance is created each time.
-  soundCloudPlayer.onPlayStateChange(handleSourcePlayStateChange);
-  soundCloudPlayer.onFinish(playNextInQueue);
-  soundCloudPlayer.onProgress((progress) => {
+  activeSource.player.play();
+  activeSource.player.onPlayStateChange(handleSourcePlayStateChange);
+  activeSource.player.onFinish(playNextInQueue);
+  activeSource.player.onProgress((progress) => {
     if (!activeSource) return;
     setProgress(progress.relativePosition, progress.currentPositionMs, activeSource.durationMs);
   });
   sourcePlaying = true;
   showNowPlaying(info);
+  setNowPlayingSource(activeSource.provider === 'spotify' ? 'Spotify' : 'SoundCloud');
   updatePlayerUI();
 }
 
@@ -512,6 +638,8 @@ async function startFromSoundCloud(url: string): Promise<void> {
     return;
   }
 
+  disposeStalePlayer('soundcloud');
+
   // A Set can't be appended to (SoundCloud's widget has no such method) —
   // any new paste while one's active replaces it. If we're already
   // capturing (an active Set, or a plain Share-Audio session with no
@@ -546,6 +674,34 @@ async function startFromSoundCloud(url: string): Promise<void> {
   if (!alreadyCapturing) onCaptureReady();
 }
 
+async function startFromLink(url: string): Promise<void> {
+  showSpotifyLoginPrompt(false);
+  const provider = detectProvider(url);
+  if (!provider) {
+    showToast("That doesn't look like a SoundCloud or Spotify link.");
+    return;
+  }
+
+  if (provider === 'soundcloud') {
+    await startFromSoundCloud(url);
+  } else {
+    await startFromSpotify(url);
+  }
+}
+
+/**
+ * Disposes the other provider's player if a session is currently active
+ * under a different provider than `provider` — called only after the
+ * caller's own early-return guards (parse failure, Spotify login-required,
+ * same-provider queue-append) have passed, so a request that bails out
+ * early never silently kills audio still playing under the other provider.
+ */
+function disposeStalePlayer(provider: 'soundcloud' | 'spotify'): void {
+  if (activeSource && activeSource.provider !== provider) {
+    activeSource.player.dispose();
+  }
+}
+
 function toggleSoundCloudPlayback(): void {
   if (!activeSource) return;
   if (sourcePlaying) activeSource.player.pause();
@@ -553,7 +709,13 @@ function toggleSoundCloudPlayback(): void {
 }
 
 function handleVolumeChange(volume: number): void {
+  // Unconditional (not gated on activeSource): both players persist and
+  // remember their volume regardless of whether a track is currently
+  // loaded (see SoundCloudPlayer.setVolume's doc comment) — the slider is
+  // reachable during a plain Share-Audio session too, before any track has
+  // loaded, and that adjustment must still apply once one does.
   soundCloudPlayer.setVolume(volume);
+  spotifyPlayer.setVolume(volume);
 }
 
 /** Returns to the front-page overlay from any state (Share-Audio or SoundCloud session). */
@@ -567,10 +729,11 @@ function goHome(): void {
   butterchurnEngine.dispose();
   capture.stop();
   soundCloudPlayer.dispose();
+  spotifyPlayer.dispose();
   hideNowPlaying();
   resetPlaybackSession();
   updatePlayerUI();
-  resetSoundCloudForm();
+  resetPlayerForm();
   resetShareButton();
   showHud(false);
   showOverlay(true);
@@ -584,13 +747,14 @@ setupControls({
   onHomeClick: goHome,
 });
 
-setupSoundCloudPanel({
-  onPlayRequested: startFromSoundCloud,
+setupPlayerPanel({
+  onPlayRequested: startFromLink,
   onToggleClick: toggleSoundCloudPlayback,
   onPrevTrack: playPrevTrack,
   onNextTrack: playNextTrack,
   onVolumeChange: handleVolumeChange,
   onSeek: handleSeek,
+  onSpotifyLoginClick: handleSpotifyLoginClick,
 });
 
 setupPresetLoader(handleLoadedPresets);
@@ -607,3 +771,18 @@ setupShuffleControls({
 updateShuffleAvailability();
 
 resizeCanvas();
+
+// If this load is the return leg of a Spotify login redirect, prefill the
+// link that triggered it rather than auto-playing: getDisplayMedia requires
+// a fresh user gesture, which a page load returning from a redirect doesn't
+// reliably carry, so one more explicit click on Play provides it.
+handleRedirectCallback()
+  .then((pendingUrl) => {
+    if (pendingUrl) {
+      prefillLinkInput(pendingUrl);
+      showToast('Logged in with Spotify — click Play to start.');
+    }
+  })
+  .catch((err) => {
+    showToast(err instanceof Error ? err.message : String(err));
+  });
