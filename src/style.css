@@ -536,6 +536,10 @@ body {
   background: #28292d;
 }
 
+#spotify-login-btn.hidden {
+  display: none;
+}
+
 .now-playing-mini.hidden {
   display: none;
 }
