@@ -6,19 +6,12 @@
  * mechanism already used for any other audio source in this app.
  */
 
+import type { TrackInfo, ProgressInfo, MediaSource } from '../media/types';
+
+export type { TrackInfo, ProgressInfo };
+
 const WIDGET_API_URL = 'https://w.soundcloud.com/player/api.js';
 const READY_TIMEOUT_MS = 12000;
-
-export interface TrackInfo {
-  title: string;
-  artworkUrl: string | null;
-  durationMs: number;
-}
-
-export interface ProgressInfo {
-  relativePosition: number;
-  currentPositionMs: number;
-}
 
 export interface SetInfo {
   tracks: TrackInfo[];
@@ -43,7 +36,7 @@ function loadWidgetApi(): Promise<void> {
 }
 
 /** Manages a single (reused) hidden SoundCloud embed for in-app playback. */
-export class SoundCloudPlayer {
+export class SoundCloudPlayer implements MediaSource {
   private iframe: HTMLIFrameElement | null = null;
   private widget: SCWidget | null = null;
   // Persisted across tracks — each load() creates a brand new widget
