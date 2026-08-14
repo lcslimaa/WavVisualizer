@@ -14,7 +14,8 @@ import {
   setShuffleAvailable,
   getShuffleIntervalSeconds,
 } from './ui/presetLoader';
-import { SoundCloudPlayer, type TrackInfo } from './soundcloud/widget';
+import { SoundCloudPlayer } from './soundcloud/widget';
+import type { MediaSource, TrackInfo } from './media/types';
 import {
   setupSoundCloudPanel,
   showNowPlaying,
@@ -70,17 +71,31 @@ const capture = new AudioCapture();
 const butterchurnEngine = new ButterchurnEngine();
 const webglSupported = isButterchurnSupported();
 const soundCloudPlayer = new SoundCloudPlayer();
-let soundCloudPlaying = false;
-let scMode: 'queue' | 'set' | null = null;
-let scQueue: QueueTrack[] = [];
-let scQueueIndex = -1;
-let scSetTracks: TrackInfo[] = [];
-let scSetIndex = -1;
-let currentTrackDurationMs = 0;
-// Bumped on every startSet() call so a delayed scheduleSetTrackRefresh()
-// from an earlier Set (or one the user has since navigated away from) can
-// tell it's stale and bail instead of overwriting the current session.
-let scSessionId = 0;
+let sourcePlaying = false;
+
+/**
+ * The single active playback session, generalized across providers.
+ * `queue`/`queueIndex` are used in 'queue' mode (individually pasted links,
+ * app-managed advance); `setTracks`/`setIndex` are used in 'set' mode (a
+ * playlist/album/Set the underlying player navigates natively). `sessionId`
+ * guards against a delayed async callback (e.g. SoundCloud's backfill poll)
+ * from a session the user has since replaced or left applying its results
+ * late.
+ */
+interface ActiveSource {
+  provider: 'soundcloud' | 'spotify';
+  player: MediaSource;
+  mode: 'queue' | 'set';
+  queue: QueueTrack[];
+  queueIndex: number;
+  setTracks: TrackInfo[];
+  setIndex: number;
+  durationMs: number;
+  sessionId: number;
+}
+
+let activeSource: ActiveSource | null = null;
+let nextSessionId = 0;
 
 const slots: Slot[] = visualizers.map((visualizer) => ({ engine: 'canvas2d', visualizer }));
 
@@ -265,62 +280,61 @@ function onCaptureReady(): void {
   rafHandle = requestAnimationFrame(tick);
 }
 
-function resetSoundCloudSession(): void {
-  scMode = null;
-  scQueue = [];
-  scQueueIndex = -1;
-  scSetTracks = [];
-  scSetIndex = -1;
+function resetPlaybackSession(): void {
+  activeSource = null;
 }
 
 async function startVisualizing(): Promise<void> {
   soundCloudPlayer.dispose();
   hideNowPlaying();
-  resetSoundCloudSession();
+  resetPlaybackSession();
   setPlayButtonMode('play');
   await capture.start();
   onCaptureReady();
 }
 
-function handleSoundCloudPlayStateChange(playing: boolean): void {
-  soundCloudPlaying = playing;
+function handleSourcePlayStateChange(playing: boolean): void {
+  sourcePlaying = playing;
   setNowPlayingToggleState(playing);
 }
 
-function updateSoundCloudUI(): void {
-  if (scMode === 'set') {
-    setQueueCounter(scSetIndex + 1, scSetTracks.length);
-    setQueueNavEnabled(scSetIndex > 0, scSetIndex < scSetTracks.length - 1);
-    renderPlaylist(
-      scSetTracks.map((track) => ({ label: track.title })),
-      scSetIndex,
-      jumpToSetTrack
-    );
-  } else if (scMode === 'queue') {
-    setQueueCounter(scQueueIndex + 1, scQueue.length);
-    setQueueNavEnabled(scQueueIndex > 0, scQueueIndex < scQueue.length - 1);
-    renderPlaylist(
-      scQueue.map((track) => ({ label: track.title ?? titleFromUrl(track.url) })),
-      scQueueIndex,
-      jumpToQueueTrack
-    );
-  } else {
+function updatePlayerUI(): void {
+  if (!activeSource) {
     setQueueCounter(0, 0);
     setQueueNavEnabled(false, false);
     renderPlaylist([], -1, () => {});
+    return;
+  }
+
+  if (activeSource.mode === 'set') {
+    setQueueCounter(activeSource.setIndex + 1, activeSource.setTracks.length);
+    setQueueNavEnabled(activeSource.setIndex > 0, activeSource.setIndex < activeSource.setTracks.length - 1);
+    renderPlaylist(
+      activeSource.setTracks.map((track) => ({ label: track.title })),
+      activeSource.setIndex,
+      jumpToSetTrack
+    );
+  } else {
+    setQueueCounter(activeSource.queueIndex + 1, activeSource.queue.length);
+    setQueueNavEnabled(activeSource.queueIndex > 0, activeSource.queueIndex < activeSource.queue.length - 1);
+    renderPlaylist(
+      activeSource.queue.map((track) => ({ label: track.title ?? titleFromUrl(track.url) })),
+      activeSource.queueIndex,
+      jumpToQueueTrack
+    );
   }
 }
 
 function jumpToQueueTrack(index: number): void {
-  if (index === scQueueIndex) return;
+  if (!activeSource || index === activeSource.queueIndex) return;
   loadQueueTrack(index).catch((err) => {
     showToast(err instanceof Error ? err.message : String(err));
   });
 }
 
 function jumpToSetTrack(index: number): void {
-  if (index === scSetIndex) return;
-  soundCloudPlayer.skipTo(index);
+  if (!activeSource || index === activeSource.setIndex) return;
+  activeSource.player.skipTo(index);
 }
 
 /**
@@ -329,44 +343,65 @@ function jumpToSetTrack(index: number): void {
  * widget instance is created each time. onTrackChange is what fixes the bug
  * where the title froze while SoundCloud auto-advanced through a Set.
  */
-function bindSetTrackChangeHandlers(): void {
+function bindSetTrackChangeHandlers(player: MediaSource): void {
   // Deliberately no onFinish binding here (unlike loadQueueTrack): onFinish
   // exists to trigger *our* manual advance-to-next-queue-item logic, which
-  // doesn't apply in Set mode — the widget advances through the Set on its
-  // own, and onTrackChange (below) is what picks up each resulting track
-  // change.
-  soundCloudPlayer.onPlayStateChange(handleSoundCloudPlayStateChange);
-  soundCloudPlayer.onTrackChange((info, index) => {
-    scSetIndex = index;
-    currentTrackDurationMs = info.durationMs;
+  // doesn't apply in Set mode — the underlying player advances through the
+  // playlist/Set on its own, and onTrackChange (below) is what picks up
+  // each resulting track change. Now provider-agnostic: called for both a
+  // SoundCloud Set and a Spotify playlist/album context.
+  player.onPlayStateChange(handleSourcePlayStateChange);
+  player.onTrackChange((info, index) => {
+    if (!activeSource) return;
+    activeSource.setIndex = index;
+    activeSource.durationMs = info.durationMs;
     showNowPlaying(info);
-    updateSoundCloudUI();
+    updatePlayerUI();
   });
-  soundCloudPlayer.onProgress((progress) => {
-    setProgress(progress.relativePosition, progress.currentPositionMs, currentTrackDurationMs);
+  player.onProgress((progress) => {
+    if (!activeSource) return;
+    setProgress(progress.relativePosition, progress.currentPositionMs, activeSource.durationMs);
   });
 }
 
 async function startQueueFresh(url: string): Promise<void> {
-  scMode = 'queue';
-  scQueue = [{ url }];
+  const sessionId = ++nextSessionId;
+  activeSource = {
+    provider: 'soundcloud',
+    player: soundCloudPlayer,
+    mode: 'queue',
+    queue: [{ url }],
+    queueIndex: -1,
+    setTracks: [],
+    setIndex: -1,
+    durationMs: 0,
+    sessionId,
+  };
   await loadQueueTrack(0);
 }
 
 async function startSet(url: string): Promise<void> {
-  const sessionId = ++scSessionId;
+  const sessionId = ++nextSessionId;
   const { tracks, initialIndex } = await soundCloudPlayer.loadSet(url);
-  scMode = 'set';
-  scSetTracks = tracks;
-  scSetIndex = initialIndex;
-  bindSetTrackChangeHandlers();
+  activeSource = {
+    provider: 'soundcloud',
+    player: soundCloudPlayer,
+    mode: 'set',
+    queue: [],
+    queueIndex: -1,
+    setTracks: tracks,
+    setIndex: initialIndex,
+    durationMs: 0,
+    sessionId,
+  };
+  bindSetTrackChangeHandlers(soundCloudPlayer);
   soundCloudPlayer.play();
-  soundCloudPlaying = true;
+  sourcePlaying = true;
   // Shows immediately from the Set's track list; onTrackChange corrects
   // durationMs (0 here, a placeholder — see loadSet's doc comment) once the
   // first PLAY event fires.
   showNowPlaying(tracks[initialIndex]);
-  updateSoundCloudUI();
+  updatePlayerUI();
   scheduleSetTrackRefresh(sessionId);
 }
 
@@ -379,19 +414,22 @@ async function startSet(url: string): Promise<void> {
  * after a handful of attempts. `sessionId` guards against a stale timer from
  * a Set the user has since replaced or left applying its results late.
  */
+/** SoundCloud-specific (see refreshSounds()'s doc comment) — Spotify's
+ * context tracks arrive fully resolved upfront via the Web API, so this
+ * backfill-poll pattern has no Spotify equivalent. */
 function scheduleSetTrackRefresh(sessionId: number, attempt = 0): void {
   const delays = [1500, 3000, 5000, 8000];
   if (attempt >= delays.length) return;
 
   window.setTimeout(async () => {
-    if (scSessionId !== sessionId || scMode !== 'set') return;
+    if (!activeSource || activeSource.sessionId !== sessionId || activeSource.mode !== 'set') return;
 
     const refreshed = await soundCloudPlayer.refreshSounds();
-    if (scSessionId !== sessionId || scMode !== 'set') return;
+    if (!activeSource || activeSource.sessionId !== sessionId || activeSource.mode !== 'set') return;
 
     let changed = false;
     let stillUnresolved = false;
-    scSetTracks = scSetTracks.map((track, index) => {
+    activeSource.setTracks = activeSource.setTracks.map((track, index) => {
       const fresh = refreshed[index];
       if (track.title !== 'Unknown track' || !fresh) return track;
       if (fresh.title === 'Unknown track') {
@@ -402,71 +440,74 @@ function scheduleSetTrackRefresh(sessionId: number, attempt = 0): void {
       return { ...track, title: fresh.title, artworkUrl: fresh.artworkUrl };
     });
 
-    if (changed) updateSoundCloudUI();
+    if (changed) updatePlayerUI();
     if (stillUnresolved) scheduleSetTrackRefresh(sessionId, attempt + 1);
   }, delays[attempt]);
 }
 
 /** Loads and plays the queue item at `index` — used for the initial track and every prev/next/auto-advance/click. */
 async function loadQueueTrack(index: number): Promise<void> {
-  const track = scQueue[index];
+  if (!activeSource) return;
+  const track = activeSource.queue[index];
   if (!track) return;
 
   const info = await soundCloudPlayer.load(track.url);
   track.title = info.title;
-  currentTrackDurationMs = info.durationMs;
-  scQueueIndex = index;
+  activeSource.durationMs = info.durationMs;
+  activeSource.queueIndex = index;
   soundCloudPlayer.play();
   // Rebound every load() — a fresh widget instance is created each time.
-  soundCloudPlayer.onPlayStateChange(handleSoundCloudPlayStateChange);
+  soundCloudPlayer.onPlayStateChange(handleSourcePlayStateChange);
   soundCloudPlayer.onFinish(playNextInQueue);
   soundCloudPlayer.onProgress((progress) => {
-    setProgress(progress.relativePosition, progress.currentPositionMs, currentTrackDurationMs);
+    if (!activeSource) return;
+    setProgress(progress.relativePosition, progress.currentPositionMs, activeSource.durationMs);
   });
-  soundCloudPlaying = true;
+  sourcePlaying = true;
   showNowPlaying(info);
-  updateSoundCloudUI();
+  updatePlayerUI();
 }
 
 function handleSeek(fraction: number): void {
-  soundCloudPlayer.seekTo(fraction, currentTrackDurationMs);
+  if (!activeSource) return;
+  activeSource.player.seekTo(fraction, activeSource.durationMs);
 }
 
 function playNextInQueue(): void {
-  if (scQueueIndex >= scQueue.length - 1) return;
-  loadQueueTrack(scQueueIndex + 1).catch((err) => {
+  if (!activeSource || activeSource.queueIndex >= activeSource.queue.length - 1) return;
+  loadQueueTrack(activeSource.queueIndex + 1).catch((err) => {
     showToast(err instanceof Error ? err.message : String(err));
   });
 }
 
 function playPrevInQueue(): void {
-  if (scQueueIndex <= 0) return;
-  loadQueueTrack(scQueueIndex - 1).catch((err) => {
+  if (!activeSource || activeSource.queueIndex <= 0) return;
+  loadQueueTrack(activeSource.queueIndex - 1).catch((err) => {
     showToast(err instanceof Error ? err.message : String(err));
   });
 }
 
 function playNextTrack(): void {
-  if (scMode === 'set') {
-    if (scSetIndex < scSetTracks.length - 1) soundCloudPlayer.next();
+  if (activeSource?.mode === 'set') {
+    if (activeSource.setIndex < activeSource.setTracks.length - 1) activeSource.player.next();
   } else {
     playNextInQueue();
   }
 }
 
 function playPrevTrack(): void {
-  if (scMode === 'set') {
-    if (scSetIndex > 0) soundCloudPlayer.prev();
+  if (activeSource?.mode === 'set') {
+    if (activeSource.setIndex > 0) activeSource.player.prev();
   } else {
     playPrevInQueue();
   }
 }
 
 async function startFromSoundCloud(url: string): Promise<void> {
-  if (scMode === 'queue' && scQueue.length > 0 && !isSetUrl(url)) {
+  if (activeSource?.provider === 'soundcloud' && activeSource.mode === 'queue' && !isSetUrl(url)) {
     // Already playing a queue — add to it instead of restarting capture.
-    scQueue.push({ url });
-    updateSoundCloudUI();
+    activeSource.queue.push({ url });
+    updatePlayerUI();
     showToast('Added to queue.');
     return;
   }
@@ -476,7 +517,7 @@ async function startFromSoundCloud(url: string): Promise<void> {
   // capturing (an active Set, or a plain Share-Audio session with no
   // SoundCloud track yet), reuse that capture instead of requesting a new
   // one — re-requesting would show another share picker unnecessarily.
-  const alreadyCapturing = capture.isActive && scMode !== null;
+  const alreadyCapturing = capture.isActive && activeSource !== null;
   if (!alreadyCapturing) {
     // Request tab-audio capture FIRST, while the click's user-activation is
     // still fresh — before touching the SoundCloud widget, which needs its
@@ -494,20 +535,21 @@ async function startFromSoundCloud(url: string): Promise<void> {
   } catch (err) {
     if (!alreadyCapturing) capture.stop();
     soundCloudPlayer.dispose();
-    resetSoundCloudSession();
+    resetPlaybackSession();
     hideNowPlaying();
-    updateSoundCloudUI();
+    updatePlayerUI();
     setPlayButtonMode('play');
     throw err;
   }
 
-  setPlayButtonMode(scMode === 'queue' ? 'queue' : 'play');
+  setPlayButtonMode(activeSource?.mode === 'queue' ? 'queue' : 'play');
   if (!alreadyCapturing) onCaptureReady();
 }
 
 function toggleSoundCloudPlayback(): void {
-  if (soundCloudPlaying) soundCloudPlayer.pause();
-  else soundCloudPlayer.play();
+  if (!activeSource) return;
+  if (sourcePlaying) activeSource.player.pause();
+  else activeSource.player.play();
 }
 
 function handleVolumeChange(volume: number): void {
@@ -526,8 +568,8 @@ function goHome(): void {
   capture.stop();
   soundCloudPlayer.dispose();
   hideNowPlaying();
-  resetSoundCloudSession();
-  updateSoundCloudUI();
+  resetPlaybackSession();
+  updatePlayerUI();
   resetSoundCloudForm();
   resetShareButton();
   showHud(false);
