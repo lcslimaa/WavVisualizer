@@ -1,37 +1,35 @@
-import type { TrackInfo } from '../soundcloud/widget';
+import type { TrackInfo } from '../media/types';
 import { showToast } from './controls';
+import { isSpotifyUrl } from '../spotify/url';
 
-export interface SoundCloudPanelCallbacks {
+export interface PlayerPanelCallbacks {
   onPlayRequested: (url: string) => Promise<void>;
   onToggleClick: () => void;
   onPrevTrack: () => void;
   onNextTrack: () => void;
   onVolumeChange: (volume: number) => void;
   onSeek: (fraction: number) => void;
+  onSpotifyLoginClick: () => void;
 }
 
 let idlePlayButtonLabel = 'Play';
 
-/** Wires the "paste a SoundCloud link" forms, Now Playing toggle, queue nav, and volume slider. */
-export function setupSoundCloudPanel(callbacks: SoundCloudPanelCallbacks): void {
+/** Wires the "paste a link" forms, Spotify login button, Now Playing toggle, queue nav, and volume slider. */
+export function setupPlayerPanel(callbacks: PlayerPanelCallbacks): void {
   // The overlay form starts a session from the front page.
-  bindSoundCloudForm(
-    'soundcloud-form',
-    'soundcloud-url',
-    'soundcloud-play-btn',
-    callbacks,
-    () => idlePlayButtonLabel
-  );
+  bindLinkForm('soundcloud-form', 'soundcloud-url', 'soundcloud-play-btn', callbacks, () => idlePlayButtonLabel);
 
   // The sidebar's form is how you add to an already-playing queue — it's
   // only reachable once the player shell is showing (the overlay form
   // covers the pre-session "start" case).
-  bindSoundCloudForm('queue-add-form', 'queue-add-url', 'queue-add-submit-btn', callbacks, () => 'Add');
+  bindLinkForm('queue-add-form', 'queue-add-url', 'queue-add-submit-btn', callbacks, () => 'Add');
 
   const toggleBtn = document.getElementById('now-playing-toggle') as HTMLButtonElement | null;
   const prevBtn = document.getElementById('queue-prev-btn') as HTMLButtonElement | null;
   const nextBtn = document.getElementById('queue-next-btn') as HTMLButtonElement | null;
   const volumeSlider = document.getElementById('volume-slider') as HTMLInputElement | null;
+  const spotifyLoginBtn = document.getElementById('spotify-login-btn') as HTMLButtonElement | null;
+  const spotifyLoginBtnSidebar = document.getElementById('spotify-login-btn-sidebar') as HTMLButtonElement | null;
 
   toggleBtn?.addEventListener('click', () => callbacks.onToggleClick());
   prevBtn?.addEventListener('click', () => callbacks.onPrevTrack());
@@ -39,12 +37,14 @@ export function setupSoundCloudPanel(callbacks: SoundCloudPanelCallbacks): void 
   volumeSlider?.addEventListener('input', () => {
     callbacks.onVolumeChange(Number(volumeSlider.value));
   });
+  spotifyLoginBtn?.addEventListener('click', () => callbacks.onSpotifyLoginClick());
+  spotifyLoginBtnSidebar?.addEventListener('click', () => callbacks.onSpotifyLoginClick());
 
   setupProgressBar(callbacks);
 }
 
 /** Click or drag the progress bar to seek; visual feedback is immediate, the actual seek fires on release. */
-function setupProgressBar(callbacks: SoundCloudPanelCallbacks): void {
+function setupProgressBar(callbacks: PlayerPanelCallbacks): void {
   const bar = document.getElementById('progress-bar');
   if (!bar) return;
 
@@ -77,11 +77,11 @@ function setupProgressBar(callbacks: SoundCloudPanelCallbacks): void {
 }
 
 /** Wires one "paste a link" form: validates, disables inputs while pending, resets on success/failure. */
-function bindSoundCloudForm(
+function bindLinkForm(
   formId: string,
   inputId: string,
   submitBtnId: string,
-  callbacks: SoundCloudPanelCallbacks,
+  callbacks: PlayerPanelCallbacks,
   getIdleLabel: () => string
 ): void {
   const form = document.getElementById(formId) as HTMLFormElement | null;
@@ -91,8 +91,8 @@ function bindSoundCloudForm(
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const url = input?.value.trim() ?? '';
-    if (!isLikelySoundCloudUrl(url)) {
-      showToast("That doesn't look like a SoundCloud track link.");
+    if (!isLikelySoundCloudUrl(url) && !isSpotifyUrl(url)) {
+      showToast("That doesn't look like a SoundCloud or Spotify link.");
       return;
     }
 
@@ -127,6 +127,32 @@ function isLikelySoundCloudUrl(url: string): boolean {
   }
 }
 
+/**
+ * Shows or hides the "Log in with Spotify" button — visible only while a
+ * Spotify link is waiting on login. There are two instances in the DOM (one
+ * in the pre-session overlay form, one in the sidebar's add-to-queue form)
+ * since only one is ever visible at a time depending on whether a session
+ * is active — both are toggled together so whichever is reachable shows up.
+ */
+export function showSpotifyLoginPrompt(show: boolean): void {
+  document.getElementById('spotify-login-btn')?.classList.toggle('hidden', !show);
+  document.getElementById('spotify-login-btn-sidebar')?.classList.toggle('hidden', !show);
+}
+
+/** Fills the paste-a-link inputs with `url` without submitting — used to resume after a Spotify login redirect. */
+export function prefillLinkInput(url: string): void {
+  const overlayInput = document.getElementById('soundcloud-url') as HTMLInputElement | null;
+  if (overlayInput) overlayInput.value = url;
+  const sidebarInput = document.getElementById('queue-add-url') as HTMLInputElement | null;
+  if (sidebarInput) sidebarInput.value = url;
+}
+
+/** Labels the Now Playing mini panel with which provider is currently active. */
+export function setNowPlayingSource(label: 'SoundCloud' | 'Spotify'): void {
+  const el = document.getElementById('now-playing-source');
+  if (el) el.textContent = label;
+}
+
 export function showNowPlaying(info: TrackInfo): void {
   const mini = document.getElementById('now-playing-mini');
   const art = document.getElementById('now-playing-art') as HTMLImageElement | null;
@@ -157,7 +183,7 @@ export function hideNowPlaying(): void {
   setProgressEnabled(false);
 }
 
-/** Called on every SoundCloud PLAY_PROGRESS tick to advance the bar and time labels. */
+/** Called on every playback progress tick to advance the bar and time labels. */
 export function setProgress(relativePosition: number, currentPositionMs: number, durationMs: number): void {
   setProgressVisual(relativePosition);
   const currentEl = document.getElementById('progress-time-current');
@@ -166,7 +192,7 @@ export function setProgress(relativePosition: number, currentPositionMs: number,
   if (totalEl) totalEl.textContent = formatTime(durationMs);
 }
 
-/** Enabled once a SoundCloud track is active — there's no "position" concept for raw system audio. */
+/** Enabled once a track is active — there's no "position" concept for raw system audio. */
 export function setProgressEnabled(enabled: boolean): void {
   const bar = document.getElementById('progress-bar');
   bar?.classList.toggle('disabled', !enabled);
@@ -255,9 +281,10 @@ export function setPlayButtonMode(mode: 'play' | 'queue'): void {
   if (playBtn && !playBtn.disabled) playBtn.textContent = idlePlayButtonLabel;
 }
 
-/** Resets the URL input, e.g. after going Home. */
-export function resetSoundCloudForm(): void {
+/** Resets the URL inputs and login prompt, e.g. after going Home. */
+export function resetPlayerForm(): void {
   const input = document.getElementById('soundcloud-url') as HTMLInputElement | null;
   if (input) input.value = '';
   setPlayButtonMode('play');
+  showSpotifyLoginPrompt(false);
 }

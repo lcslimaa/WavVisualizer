@@ -32,11 +32,12 @@
                 id="soundcloud-url"
                 type="url"
                 inputmode="url"
-                placeholder="Paste a SoundCloud track link&hellip;"
-                aria-label="SoundCloud track URL"
+                placeholder="Paste a SoundCloud or Spotify link&hellip;"
+                aria-label="SoundCloud or Spotify link"
                 required
               />
               <button id="soundcloud-play-btn" type="submit">Play</button>
+              <button id="spotify-login-btn" type="button" class="hidden">Log in with Spotify</button>
             </form>
           </div>
         </div>
@@ -76,17 +77,18 @@
                 id="queue-add-url"
                 type="url"
                 inputmode="url"
-                placeholder="Paste a SoundCloud link&hellip;"
-                aria-label="Add SoundCloud track URL"
+                placeholder="Paste a SoundCloud or Spotify link&hellip;"
+                aria-label="Add SoundCloud or Spotify link"
                 required
               />
               <button id="queue-add-submit-btn" type="submit">Add</button>
+              <button id="spotify-login-btn-sidebar" type="button" class="hidden">Log in with Spotify</button>
             </form>
             <div id="playlist-list" class="playlist-list"></div>
 
             <div id="now-playing-mini" class="now-playing-mini hidden">
               <img id="now-playing-art" class="now-playing-art" alt="" />
-              <span class="now-playing-source">SoundCloud</span>
+              <span id="now-playing-source" class="now-playing-source">SoundCloud</span>
             </div>
           </aside>
         </div>
