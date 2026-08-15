@@ -291,7 +291,11 @@ export class SpotifyPlayer implements MediaSource {
 
     while (path) {
       const res = await this.webApiRequest(path);
-      if (!res.ok) throw new Error("This playlist can't be loaded — it may be private or unavailable.");
+      if (!res.ok) {
+        throw new Error(
+          "This playlist can't be loaded — it may be private, or (while this app is in development mode) only playlists you own or collaborate on are accessible."
+        );
+      }
       const page = (await res.json()) as SpotifyApiPagedTracks;
 
       for (const rawItem of page.items) {
