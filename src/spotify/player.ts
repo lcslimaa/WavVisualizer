@@ -251,16 +251,20 @@ export class SpotifyPlayer implements MediaSource {
     if (tracks.length === 0) throw new Error('This playlist has no playable tracks.');
 
     this.currentContextUri = contextUri;
-    await this.playContext(contextUri, 0);
+    // Start from the first *filtered* track's own URI, not raw position 0 —
+    // if the playlist's actual first item was filtered out (a local file,
+    // say), position 0 in Spotify's unfiltered list isn't tracks[0] here.
+    await this.playContext(contextUri, { uri: this.contextTrackUris[0] });
 
     return { tracks, initialIndex: 0 };
   }
 
-  private async playContext(contextUri: string, offset: number): Promise<void> {
+  private async playContext(contextUri: string, offset: number | { uri: string }): Promise<void> {
+    const offsetBody = typeof offset === 'number' ? { position: offset } : { uri: offset.uri };
     const res = await this.webApiRequest(`/me/player/play?device_id=${this.deviceId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ context_uri: contextUri, offset: { position: offset } }),
+      body: JSON.stringify({ context_uri: contextUri, offset: offsetBody }),
     });
     if (!res.ok) throw new Error(await this.playbackErrorMessage(res));
   }
@@ -350,7 +354,9 @@ export class SpotifyPlayer implements MediaSource {
   /** Only meaningful in 'set' mode — jumps to `index` within the currently loaded context. */
   skipTo(index: number): void {
     if (!this.currentContextUri) return;
-    this.playContext(this.currentContextUri, index).catch((err) => {
+    const uri = this.contextTrackUris[index];
+    if (!uri) return;
+    this.playContext(this.currentContextUri, { uri }).catch((err) => {
       this.errorCb?.(err instanceof Error ? err.message : String(err));
     });
   }
@@ -389,6 +395,9 @@ export class SpotifyPlayer implements MediaSource {
     this.currentContextUri = null;
     this.contextTrackUris = [];
     this.lastKnownState = null;
+    this.trackChangeCb = null;
+    this.playStateCb = null;
+    this.progressCb = null;
     this.finishCb = null;
     this.lastTrackUri = null;
     this.wasNearEnd = false;

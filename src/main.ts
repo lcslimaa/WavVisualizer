@@ -362,25 +362,41 @@ function jumpToSetTrack(index: number): void {
 }
 
 /**
- * Binds the handlers that keep the UI in sync with a Set's internal
- * playback — must be (re)bound after every loadSet() call, since a fresh
- * widget instance is created each time. onTrackChange is what fixes the bug
- * where the title froze while SoundCloud auto-advanced through a Set.
+ * Binds the handlers that keep the UI in sync with a Set/playlist/album's
+ * internal playback. Provider-agnostic: works for both a SoundCloud Set
+ * (rebound after every loadSet() call, since a fresh widget instance is
+ * created each time) and a Spotify context (bound once per loadContext()
+ * call against the same persistent SpotifyPlayer). onTrackChange is what
+ * keeps the title in sync as the underlying player auto-advances.
  */
 function bindSetTrackChangeHandlers(player: MediaSource): void {
   // Deliberately no onFinish binding here (unlike loadQueueTrack): onFinish
   // exists to trigger *our* manual advance-to-next-queue-item logic, which
   // doesn't apply in Set mode — the underlying player advances through the
   // playlist/Set on its own, and onTrackChange (below) is what picks up
-  // each resulting track change. Now provider-agnostic: called for both a
+  // each resulting track change. Provider-agnostic: called for both a
   // SoundCloud Set and a Spotify playlist/album context.
   player.onPlayStateChange(handleSourcePlayStateChange);
   player.onTrackChange((info, index) => {
     if (!activeSource) return;
-    activeSource.setIndex = index;
+    // SoundCloud's onTrackChange fires only on genuine track transitions,
+    // but Spotify's underlying event (player_state_changed) also fires on
+    // plain pause/resume/seek with the same track — without this check,
+    // every one of those would snap the progress bar to 0 and rebuild the
+    // sidebar's scroll position. Skip the redraw when nothing changed.
+    // -1 (a duplicate or market-relinked track Spotify couldn't resolve to
+    // a known index) is deliberately ignored rather than assigned, so it
+    // doesn't clear the current highlight/counter.
+    const unchanged =
+      activeSource.setIndex === index &&
+      activeSource.durationMs === info.durationMs &&
+      activeSource.setTracks[index]?.title === info.title;
+    if (index >= 0) activeSource.setIndex = index;
     activeSource.durationMs = info.durationMs;
-    showNowPlaying(info);
-    updatePlayerUI();
+    if (!unchanged) {
+      showNowPlaying(info);
+      updatePlayerUI();
+    }
   });
   player.onProgress((progress) => {
     if (!activeSource) return;
@@ -509,6 +525,8 @@ async function startFromSpotify(url: string): Promise<void> {
     hideNowPlaying();
     updatePlayerUI();
     setPlayButtonMode('play');
+    // See the identical comment in startFromSoundCloud's catch block.
+    if (alreadyCapturing) goHome();
     throw err;
   }
 
@@ -531,10 +549,10 @@ function handleSpotifyLoginClick(): void {
  * backfill whatever resolves, stopping once nothing's left unresolved or
  * after a handful of attempts. `sessionId` guards against a stale timer from
  * a Set the user has since replaced or left applying its results late.
- */
-/** SoundCloud-specific (see refreshSounds()'s doc comment) — Spotify's
+ * SoundCloud-specific (see refreshSounds()'s doc comment) — Spotify's
  * context tracks arrive fully resolved upfront via the Web API, so this
- * backfill-poll pattern has no Spotify equivalent. */
+ * backfill-poll pattern has no Spotify equivalent.
+ */
 function scheduleSetTrackRefresh(sessionId: number, attempt = 0): void {
   const delays = [1500, 3000, 5000, 8000];
   if (attempt >= delays.length) return;
@@ -667,6 +685,11 @@ async function startFromSoundCloud(url: string): Promise<void> {
     hideNowPlaying();
     updatePlayerUI();
     setPlayButtonMode('play');
+    // If capture was reused from a still-live session that we just disposed
+    // (a cross-provider switch), a failure here leaves capture running with
+    // nothing playing and no visible way back — go all the way Home instead
+    // of leaving a silent, empty player shell up.
+    if (alreadyCapturing) goHome();
     throw err;
   }
 
@@ -718,7 +741,7 @@ function handleVolumeChange(volume: number): void {
   spotifyPlayer.setVolume(volume);
 }
 
-/** Returns to the front-page overlay from any state (Share-Audio or SoundCloud session). */
+/** Returns to the front-page overlay from any state (Share-Audio, SoundCloud, or Spotify session). */
 function goHome(): void {
   cancelAnimationFrame(rafHandle);
   stopShuffleTimer();

@@ -26,6 +26,22 @@ npm run dev
 
 Open the printed `localhost` URL in Chrome or Edge.
 
+## Spotify setup (optional)
+
+SoundCloud links work with no setup. Spotify links need a one-time setup, because Spotify requires every app to register its own credentials:
+
+1. Create a free app at the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
+2. Add Redirect URI `http://127.0.0.1:5173/` exactly (the loopback IP literal — Spotify rejects the string `localhost`).
+3. Copy `.env.example` to `.env` and paste in your app's Client ID:
+   ```bash
+   cp .env.example .env
+   ```
+4. `npm run dev` — the dev server is pinned to port 5173 to match the registered Redirect URI.
+
+Two real limitations, both enforced by Spotify and not fixable in this app:
+- **Playback requires Spotify Premium** — Free accounts get a clear error when trying to play.
+- **Playlists**: while the app is in Spotify's "Development Mode" (the default until you apply for extended access), only playlists you own or collaborate on are accessible — playlists you merely follow (including Spotify's own editorial playlists) fail with a permissions error. Tracks and albums aren't affected.
+
 ## Usage
 
 - Click **Share Audio**, then pick a tab, window, or screen — make sure **"Share audio"** is checked in the picker.

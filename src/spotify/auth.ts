@@ -66,6 +66,11 @@ export function isLoggedIn(): boolean {
  * redirects to Spotify's consent screen.
  */
 export async function login(pendingUrl: string): Promise<void> {
+  const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID;
+  if (!clientId) {
+    throw new Error("Spotify isn't configured for this deployment — see README.md's Spotify setup section.");
+  }
+
   const verifier = randomString(64);
   const challenge = await sha256Base64Url(verifier);
   const state = randomString(16);
@@ -75,7 +80,7 @@ export async function login(pendingUrl: string): Promise<void> {
   sessionStorage.setItem(PENDING_URL_STORAGE_KEY, pendingUrl);
 
   const params = new URLSearchParams({
-    client_id: import.meta.env.VITE_SPOTIFY_CLIENT_ID,
+    client_id: clientId,
     response_type: 'code',
     redirect_uri: REDIRECT_URI,
     code_challenge_method: 'S256',
@@ -91,8 +96,10 @@ export async function login(pendingUrl: string): Promise<void> {
  * Call once on app load. If the current URL is the return leg of a login
  * redirect (`?code=...&state=...` or `?error=...`), exchanges the code for
  * tokens, clears the query string, and returns the pending URL that was
- * stashed before redirecting — or `null` for any page load this doesn't
- * apply to (a normal load, or a rejected/failed consent screen).
+ * stashed before redirecting. Returns `null` only when this page load isn't
+ * a redirect return at all (a normal load). Throws if it IS a redirect
+ * return but failed (denied consent, state mismatch, failed token
+ * exchange) — callers should catch and show the user something.
  */
 export async function handleRedirectCallback(): Promise<string | null> {
   const url = new URL(window.location.href);
@@ -100,6 +107,10 @@ export async function handleRedirectCallback(): Promise<string | null> {
   const returnedState = url.searchParams.get('state');
   const error = url.searchParams.get('error');
 
+  // Not a redirect return at all — a normal page load. The only legitimate
+  // `null` return in this function; every other early exit below is a
+  // redirect return that failed, and throws instead so the caller can show
+  // the user something instead of silently doing nothing.
   if (!code && !error) return null;
 
   history.replaceState(null, '', url.origin + url.pathname);
@@ -112,7 +123,7 @@ export async function handleRedirectCallback(): Promise<string | null> {
   sessionStorage.removeItem(PENDING_URL_STORAGE_KEY);
 
   if (error || !code || !verifier || !returnedState || returnedState !== expectedState) {
-    return null;
+    throw new Error('Spotify login was cancelled or failed — please try again.');
   }
 
   const body = new URLSearchParams({
@@ -129,11 +140,11 @@ export async function handleRedirectCallback(): Promise<string | null> {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
     });
-    if (!res.ok) return null;
+    if (!res.ok) throw new Error('Spotify login failed — please try again.');
 
     const json = (await res.json()) as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown };
     if (typeof json.access_token !== 'string' || typeof json.refresh_token !== 'string' || typeof json.expires_in !== 'number') {
-      return null;
+      throw new Error('Spotify login failed — please try again.');
     }
 
     writeStoredTokens({
@@ -144,7 +155,7 @@ export async function handleRedirectCallback(): Promise<string | null> {
 
     return pendingUrl;
   } catch {
-    return null;
+    throw new Error('Spotify login failed — please try again.');
   }
 }
 

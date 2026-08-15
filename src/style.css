@@ -536,7 +536,8 @@ body {
   background: #28292d;
 }
 
-#spotify-login-btn.hidden {
+#spotify-login-btn.hidden,
+#spotify-login-btn-sidebar.hidden {
   display: none;
 }
 

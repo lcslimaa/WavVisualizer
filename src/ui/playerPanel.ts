@@ -29,6 +29,7 @@ export function setupPlayerPanel(callbacks: PlayerPanelCallbacks): void {
   const nextBtn = document.getElementById('queue-next-btn') as HTMLButtonElement | null;
   const volumeSlider = document.getElementById('volume-slider') as HTMLInputElement | null;
   const spotifyLoginBtn = document.getElementById('spotify-login-btn') as HTMLButtonElement | null;
+  const spotifyLoginBtnSidebar = document.getElementById('spotify-login-btn-sidebar') as HTMLButtonElement | null;
 
   toggleBtn?.addEventListener('click', () => callbacks.onToggleClick());
   prevBtn?.addEventListener('click', () => callbacks.onPrevTrack());
@@ -37,6 +38,7 @@ export function setupPlayerPanel(callbacks: PlayerPanelCallbacks): void {
     callbacks.onVolumeChange(Number(volumeSlider.value));
   });
   spotifyLoginBtn?.addEventListener('click', () => callbacks.onSpotifyLoginClick());
+  spotifyLoginBtnSidebar?.addEventListener('click', () => callbacks.onSpotifyLoginClick());
 
   setupProgressBar(callbacks);
 }
@@ -125,9 +127,16 @@ function isLikelySoundCloudUrl(url: string): boolean {
   }
 }
 
-/** Shows or hides the "Log in with Spotify" button — visible only while a Spotify link is waiting on login. */
+/**
+ * Shows or hides the "Log in with Spotify" button — visible only while a
+ * Spotify link is waiting on login. There are two instances in the DOM (one
+ * in the pre-session overlay form, one in the sidebar's add-to-queue form)
+ * since only one is ever visible at a time depending on whether a session
+ * is active — both are toggled together so whichever is reachable shows up.
+ */
 export function showSpotifyLoginPrompt(show: boolean): void {
   document.getElementById('spotify-login-btn')?.classList.toggle('hidden', !show);
+  document.getElementById('spotify-login-btn-sidebar')?.classList.toggle('hidden', !show);
 }
 
 /** Fills the paste-a-link inputs with `url` without submitting — used to resume after a Spotify login redirect. */
