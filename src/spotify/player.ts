@@ -44,7 +44,7 @@ interface SpotifyApiFullTrack extends SpotifyApiSimplifiedTrack {
 }
 
 interface SpotifyApiTrackItem {
-  track: SpotifyApiFullTrack | null;
+  item: SpotifyApiFullTrack | null;
 }
 
 interface SpotifyApiPagedTracks {
@@ -268,7 +268,6 @@ export class SpotifyPlayer implements MediaSource {
   private async fetchContextTracks(contextUri: string): Promise<TrackInfo[]> {
     const [, type, id] = contextUri.split(':');
     const isAlbum = type === 'album';
-    const kind = isAlbum ? 'albums' : 'playlists';
 
     // Albums don't repeat their artwork per-track (unlike playlists' per-item
     // album.images) — fetch it once upfront and reuse it for every track.
@@ -281,7 +280,12 @@ export class SpotifyPlayer implements MediaSource {
       }
     }
 
-    let path: string | null = `/${kind}/${id}/tracks?limit=50`;
+    // Spotify migrated "Get Playlist Items" from /playlists/{id}/tracks to
+    // /playlists/{id}/items (effective March 2026) — the old path now 403s
+    // for Development Mode apps. Albums kept their original /albums/{id}/tracks
+    // path and response shape; only the playlist path and its item-wrapper
+    // field (track → item) changed.
+    let path: string | null = isAlbum ? `/albums/${id}/tracks?limit=50` : `/playlists/${id}/items?limit=50`;
     const uris: string[] = [];
     const tracks: TrackInfo[] = [];
 
@@ -291,12 +295,12 @@ export class SpotifyPlayer implements MediaSource {
       const page = (await res.json()) as SpotifyApiPagedTracks;
 
       for (const rawItem of page.items) {
-        // Playlist items wrap the track in `{ track: ... }` (and it can be
+        // Playlist items wrap the track in `{ item: ... }` (and it can be
         // null for local files / regionally unavailable items); album items
         // are the (simplified) track object directly.
         const track = isAlbum
           ? (rawItem as SpotifyApiSimplifiedTrack)
-          : (rawItem as SpotifyApiTrackItem).track;
+          : (rawItem as SpotifyApiTrackItem).item;
         if (!track || !track.uri || !track.name || typeof track.duration_ms !== 'number') continue;
 
         uris.push(track.uri);
