@@ -34,6 +34,7 @@ import {
 import { SpotifyPlayer } from './spotify/player';
 import { parseSpotifyUrl, toSpotifyUri, type SpotifyLink } from './spotify/url';
 import { login as spotifyLogin, isLoggedIn, handleRedirectCallback } from './spotify/auth';
+import { isElectronRuntime } from './platform';
 
 interface QueueTrack {
   url: string;
@@ -485,10 +486,40 @@ async function startSpotifySet(link: SpotifyLink): Promise<void> {
   updatePlayerUI();
 }
 
+/**
+ * Electron only: the Web Playback SDK needs DRM (Widevine) support that
+ * Electron doesn't ship (spotify/web-playback-sdk#7), so in-app playback
+ * isn't possible there. Hand the link to the native Spotify app instead —
+ * it plays there, and our system-audio loopback capture (already active,
+ * or started here exactly like the plain Share Audio button) visualizes
+ * it like any other source. No in-app progress bar/controls for it, same
+ * as any other app playing audio the browser build can't reach into.
+ */
+async function openSpotifyInNativeApp(link: SpotifyLink): Promise<void> {
+  disposeStalePlayer('spotify');
+  resetPlaybackSession();
+  hideNowPlaying();
+  setPlayButtonMode('play');
+  updatePlayerUI();
+
+  window.location.href = toSpotifyUri(link);
+  showToast('Opening in Spotify — visualizing your system audio.');
+
+  if (!capture.isActive) {
+    await capture.start();
+    onCaptureReady();
+  }
+}
+
 async function startFromSpotify(url: string): Promise<void> {
   const link = parseSpotifyUrl(url);
   if (!link) {
     showToast("That doesn't look like a Spotify link.");
+    return;
+  }
+
+  if (isElectronRuntime(navigator.userAgent)) {
+    await openSpotifyInNativeApp(link);
     return;
   }
 

@@ -33,6 +33,11 @@
     ],
     "directories": {
       "output": "release"
+    },
+    "mac": {
+      "extendInfo": {
+        "NSAudioCaptureUsageDescription": "WavVisualizer captures system audio to drive its visualizations."
+      }
     }
   }
 }
