@@ -3,16 +3,41 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "electron:compile": "tsc -p tsconfig.electron.json",
+    "electron": "npm run build && npm run electron:compile && electron .",
+    "electron:dist": "npm run build && npm run electron:compile && electron-builder"
   },
   "devDependencies": {
+    "@types/node": "^26.2.0",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
     "typescript": "~6.0.2",
-    "vite": "^8.2.0"
+    "vite": "^8.2.0",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "butterchurn": "^2.6.7"
+  },
+  "build": {
+    "appId": "com.wavvisualizer.app",
+    "productName": "WavVisualizer",
+    "files": [
+      "dist-electron/**/*",
+      "dist/**/*"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "extendInfo": {
+        "NSAudioCaptureUsageDescription": "WavVisualizer captures system audio to drive its visualizations."
+      }
+    }
   }
 }

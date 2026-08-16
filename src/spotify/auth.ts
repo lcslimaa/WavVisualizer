@@ -37,6 +37,20 @@ async function sha256Base64Url(input: string): Promise<string> {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+/**
+ * Whether `origin` matches the origin Spotify has registered as our
+ * redirect URI. In the browser build this is always true (Vite pins dev
+ * to 127.0.0.1:5173, and production deploys register their own origin).
+ * In the packaged desktop app, the bundled static server
+ * (electron/server.ts) normally binds that exact port too — but falls
+ * back to another port if it's already taken, which login() checks this
+ * for so it can fail with a clear message instead of redirecting out to
+ * Spotify and failing there with theirs.
+ */
+export function originMatchesRedirectUri(origin: string): boolean {
+  return origin === new URL(REDIRECT_URI).origin;
+}
+
 function readStoredTokens(): StoredTokens | null {
   const raw = localStorage.getItem(TOKENS_STORAGE_KEY);
   if (!raw) return null;
@@ -69,6 +83,11 @@ export async function login(pendingUrl: string): Promise<void> {
   const clientId = import.meta.env.VITE_SPOTIFY_CLIENT_ID;
   if (!clientId) {
     throw new Error("Spotify isn't configured for this deployment — see README.md's Spotify setup section.");
+  }
+  if (!originMatchesRedirectUri(window.location.origin)) {
+    throw new Error(
+      "Spotify login isn't available right now — another app is using port 5173. Close it and restart WavVisualizer.",
+    );
   }
 
   const verifier = randomString(64);
