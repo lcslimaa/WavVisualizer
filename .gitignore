@@ -10,6 +10,8 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+dist-electron
+release
 *.local
 
 # Local test presets (third-party MilkDrop/Butterchurn packs, not app code)
