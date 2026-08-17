@@ -1,7 +1,7 @@
 {
   "name": "wavvisualizer",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
@@ -11,7 +11,8 @@
     "test": "vitest run",
     "electron:compile": "tsc -p tsconfig.electron.json",
     "electron": "npm run build && npm run electron:compile && electron .",
-    "electron:dist": "npm run build && npm run electron:compile && electron-builder"
+    "electron:dist": "npm run build && npm run electron:compile && electron-builder --mac",
+    "electron:dist:win": "npm run build && npm run electron:compile && electron-builder --win --x64 --arm64"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
@@ -38,6 +39,12 @@
       "extendInfo": {
         "NSAudioCaptureUsageDescription": "WavVisualizer captures system audio to drive its visualizations."
       }
+    },
+    "win": {
+      "target": [
+        "portable",
+        "zip"
+      ]
     }
   }
 }
